@@ -1,0 +1,23 @@
+# Excel / Office temporary files
+~$*
+*.tmp
+*.bak
+*.xlk
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Project generated/large folders (avoid pushing sample data)
+/samples/
+/otherTools/
+/VBA_Export/backup/
+**/.DATA/
+
+# Archives (usually sample attachments)
+*.zip
+
+# Logs
+*.log
+
