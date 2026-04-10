@@ -12,12 +12,20 @@ Desktop.ini
 # Project generated/large folders (avoid pushing sample data)
 /samples/
 /otherTools/
+/oldxlsx/
+/校验/
 /VBA_Export/backup/
 **/.DATA/
+
+# Workbook/data files - keep repo focused on source modules/docs
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.csv
 
 # Archives (usually sample attachments)
 *.zip
 
 # Logs
 *.log
-
