@@ -148,9 +148,7 @@ Public Sub 追加列按批注()
             extWs.Cells(1, nextCol).value = headerText
             extWs.Cells(1, nextCol).Font.Bold = True
 
-            For destRow = 2 To lastRowSrc
-                extWs.Cells(destRow, nextCol).value = 单元格值(srcWs.Cells(destRow, colNum))
-            Next destRow
+            CopySourceColumnToTarget srcWs, colNum, lastRowSrc, extWs, nextCol
 
             nextCol = nextCol + 1
 NextSrcSheet:
@@ -315,4 +313,45 @@ Private Function 读取配置值(ByVal 键 As String, ByVal 键名 As String) As String
             Exit Function
         End If
     Next i
+End Function
+
+Private Sub CopySourceColumnToTarget(ByVal srcWs As Worksheet, ByVal srcCol As Long, ByVal srcLastRow As Long, ByVal tgtWs As Worksheet, ByVal tgtCol As Long)
+    Dim srcRange As Range
+    Dim tgtRange As Range
+    Dim srcArr As Variant
+    Dim r As Long
+
+    If srcLastRow < 2 Then Exit Sub
+
+    Set srcRange = srcWs.Range(srcWs.Cells(2, srcCol), srcWs.Cells(srcLastRow, srcCol))
+    Set tgtRange = tgtWs.Range(tgtWs.Cells(2, tgtCol), tgtWs.Cells(srcLastRow, tgtCol))
+
+    If Not RangeHasAnyMerge(srcRange) Then
+        tgtRange.Value2 = srcRange.Value2
+        Exit Sub
+    End If
+
+    If srcRange.Cells.CountLarge = 1 Then
+        ReDim srcArr(1 To 1, 1 To 1)
+        srcArr(1, 1) = srcRange.Value2
+    Else
+        srcArr = srcRange.Value2
+    End If
+
+    For r = 1 To UBound(srcArr, 1)
+        tgtRange.Cells(r, 1).Value2 = 单元格值(srcWs.Cells(r + 1, srcCol))
+    Next r
+End Sub
+
+Private Function RangeHasAnyMerge(ByVal rg As Range) As Boolean
+    Dim v As Variant
+
+    On Error Resume Next
+    v = rg.MergeCells
+    If IsNull(v) Then
+        RangeHasAnyMerge = True
+    Else
+        RangeHasAnyMerge = CBool(v)
+    End If
+    On Error GoTo 0
 End Function

@@ -125,19 +125,22 @@ Function ProcessSingleFileSimple(filePath As String, ByRef sheetsProcessed As In
     Dim wb As Workbook
     Dim ws As Worksheet
     Dim count As Integer
+    Dim headerChanged As Boolean
+    Dim fileChanged As Boolean
     
     On Error GoTo ErrorHandler
     
     ' 初始化
     count = 0
-    Set wb = Workbooks.Open(filePath, ReadOnly:=False)
+    Set wb = Workbooks.Open(filePath, ReadOnly:=False, UpdateLinks:=0, AddToMru:=False)
     
     ' 遍历工作表
     For Each ws In wb.Worksheets
         ' 检查是否包含"外汇"
         If InStr(1, ws.Name, "外汇", vbTextCompare) > 0 Then
             ' 处理页眉
-            Call ProcessHeader(ws)
+            headerChanged = ProcessHeader(ws)
+            If headerChanged Then fileChanged = True
             count = count + 1
         End If
     Next ws
@@ -146,7 +149,7 @@ Function ProcessSingleFileSimple(filePath As String, ByRef sheetsProcessed As In
     sheetsProcessed = count
     
     ' 保存并关闭
-    If count > 0 Then
+    If fileChanged Then
         wb.Save
     End If
     
@@ -163,22 +166,46 @@ ErrorHandler:
     ProcessSingleFileSimple = False
 End Function
 
-Sub ProcessHeader(ws As Worksheet)
-    ' 处理左页眉
-    If Len(ws.PageSetup.leftHeader) > 0 Then
-        ws.PageSetup.leftHeader = ReplaceHeader(ws.PageSetup.leftHeader)
+Function ProcessHeader(ws As Worksheet) As Boolean
+    Dim leftHeader As String, centerHeader As String, rightHeader As String
+    Dim newLeft As String, newCenter As String, newRight As String
+    Dim canUsePrintCommunication As Boolean
+
+    leftHeader = ws.PageSetup.leftHeader
+    centerHeader = ws.PageSetup.centerHeader
+    rightHeader = ws.PageSetup.rightHeader
+
+    newLeft = leftHeader
+    newCenter = centerHeader
+    newRight = rightHeader
+
+    If Len(newLeft) > 0 Then newLeft = ReplaceHeader(newLeft)
+    If Len(newCenter) > 0 Then newCenter = ReplaceHeader(newCenter)
+    If Len(newRight) > 0 Then newRight = ReplaceHeader(newRight)
+
+    If newLeft = leftHeader And newCenter = centerHeader And newRight = rightHeader Then
+        ProcessHeader = False
+        Exit Function
     End If
-    
-    ' 处理中页眉
-    If Len(ws.PageSetup.centerHeader) > 0 Then
-        ws.PageSetup.centerHeader = ReplaceHeader(ws.PageSetup.centerHeader)
+
+    On Error Resume Next
+    Application.PrintCommunication = False
+    canUsePrintCommunication = (Err.Number = 0)
+    Err.Clear
+    On Error GoTo 0
+
+    If newLeft <> leftHeader Then ws.PageSetup.leftHeader = newLeft
+    If newCenter <> centerHeader Then ws.PageSetup.centerHeader = newCenter
+    If newRight <> rightHeader Then ws.PageSetup.rightHeader = newRight
+
+    If canUsePrintCommunication Then
+        On Error Resume Next
+        Application.PrintCommunication = True
+        On Error GoTo 0
     End If
-    
-    ' 处理右页眉
-    If Len(ws.PageSetup.rightHeader) > 0 Then
-        ws.PageSetup.rightHeader = ReplaceHeader(ws.PageSetup.rightHeader)
-    End If
-End Sub
+
+    ProcessHeader = True
+End Function
 
 Function ReplaceHeader(headerText As String) As String
     Dim result As String

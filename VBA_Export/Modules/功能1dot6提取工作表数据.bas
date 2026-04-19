@@ -44,115 +44,109 @@ Sub 批量提取工作表数据()
     If fd.Show = -1 Then
         Application.ScreenUpdating = False
         Application.DisplayAlerts = False
+        Application.Calculation = xlCalculationManual
+        Application.EnableEvents = False
         
         ' 创建字典来管理输出文件
         Set outputDict = CreateObject("Scripting.Dictionary")
         
-        ' 处理每个配置行
-        For i = 2 To lastRow
-            Dim shouldSkip As Boolean
-            Dim shouldFullExtract As Boolean
-            Dim sheetInfo(1 To 5) As String
-            Dim outputFileName As String
-            Dim extractRows As String
-            Dim extractCols As String
-            
-            ' 读取配置
+        ' [优化A] 预读所有配置行，避免每条配置都重复打开同一文件
+        Dim iCfg As Long
+        Dim cfgSkip() As Boolean
+        Dim cfgFullExtract() As Boolean
+        Dim cfgSheetInfo() As Variant
+        Dim cfgOutputFile() As String
+        Dim cfgRows() As String
+        Dim cfgCols() As String
+        ReDim cfgSkip(2 To lastRow)
+        ReDim cfgFullExtract(2 To lastRow)
+        ReDim cfgSheetInfo(2 To lastRow, 1 To 5)
+        ReDim cfgOutputFile(2 To lastRow)
+        ReDim cfgRows(2 To lastRow)
+        ReDim cfgCols(2 To lastRow)
+        For iCfg = 2 To lastRow
             With configSheet
-                ' 是否禁用 - F列
-                shouldSkip = (.Cells(i, "F").value = "是" Or .Cells(i, "F").value = "1" Or .Cells(i, "F").value = True)
-                
-                ' 如果禁用则跳过此配置
-                If Not shouldSkip Then
-                    ' 前五列确定sheet名
-                    sheetInfo(1) = CStr(.Cells(i, "A").value) ' 币种
-                    sheetInfo(2) = CStr(.Cells(i, "B").value) ' 地区
-                    sheetInfo(3) = CStr(.Cells(i, "C").value) ' 机构
-                    sheetInfo(4) = CStr(.Cells(i, "D").value) ' 类型
-                    sheetInfo(5) = CStr(.Cells(i, "E").value) ' 名称
-                    
-                    ' 是否整表提取 - G列
-                    shouldFullExtract = (.Cells(i, "G").value = "是" Or .Cells(i, "G").value = "1" Or .Cells(i, "G").value = True)
-                    
-                    ' 提取行列配置
-                    extractRows = CStr(.Cells(i, "H").value) ' 提取行
-                    extractCols = CStr(.Cells(i, "I").value) ' 提取列
-                    
-                    ' 输出文件名 - J列
-                    outputFileName = CStr(.Cells(i, "J").value)
-                    If outputFileName = "" Then
-                        outputFileName = "提取结果_" & Format(Now, "yyyymmdd_hhmmss")
+                cfgSkip(iCfg) = (.Cells(iCfg, "F").value = "是" Or .Cells(iCfg, "F").value = "1" Or .Cells(iCfg, "F").value = True)
+                If Not cfgSkip(iCfg) Then
+                    cfgSheetInfo(iCfg, 1) = CStr(.Cells(iCfg, "A").value)
+                    cfgSheetInfo(iCfg, 2) = CStr(.Cells(iCfg, "B").value)
+                    cfgSheetInfo(iCfg, 3) = CStr(.Cells(iCfg, "C").value)
+                    cfgSheetInfo(iCfg, 4) = CStr(.Cells(iCfg, "D").value)
+                    cfgSheetInfo(iCfg, 5) = CStr(.Cells(iCfg, "E").value)
+                    cfgFullExtract(iCfg) = (.Cells(iCfg, "G").value = "是" Or .Cells(iCfg, "G").value = "1" Or .Cells(iCfg, "G").value = True)
+                    cfgRows(iCfg) = CStr(.Cells(iCfg, "H").value)
+                    cfgCols(iCfg) = CStr(.Cells(iCfg, "I").value)
+                    cfgOutputFile(iCfg) = CStr(.Cells(iCfg, "J").value)
+                    If cfgOutputFile(iCfg) = "" Then
+                        cfgOutputFile(iCfg) = "提取结果_" & Format(Now, "yyyymmdd_hhmmss")
                     End If
-                    
-                    ' 在所有源文件中查找匹配的sheet
-                    For Each fileItem In fd.SelectedItems
-                        Dim sourceWb As Workbook
-                        Dim sourceWs As Worksheet
-                        Dim targetWs As Worksheet
-                        Dim targetWb As Workbook
-                        
-                        On Error Resume Next
-                        Set sourceWb = Workbooks.Open(CStr(fileItem), ReadOnly:=True)
-                        If Err.Number <> 0 Then
-                            Debug.Print "无法打开文件: " & fileItem
-                            On Error GoTo 0
-                        Else
-                            On Error GoTo 0
-                            
-                            ' 查找所有匹配的工作表（修复：不只匹配第一个）
-                            Dim matchedSheets As Collection
-                            Set matchedSheets = 查找所有匹配工作表(sourceWb, sheetInfo)
-                            
-                            ' 处理每一个匹配的工作表
-                            If matchedSheets.count > 0 Then
-                                Dim wsItem As Variant
-                                
-                                For Each wsItem In matchedSheets
-                                    Set sourceWs = wsItem
-                                    
-                                    ' 获取或创建目标工作簿
-                                    If Not outputDict.Exists(outputFileName) Then
-                                        Set targetWb = Workbooks.Add
-                                        targetWb.SaveAs sourceWb.path & "\" & outputFileName & ".xlsx"
-                                        outputDict.Add outputFileName, targetWb
-                                    Else
-                                        Set targetWb = outputDict(outputFileName)
-                                    End If
-                                    
-                                    ' 在目标工作簿中创建新工作表（使用源工作表的原名）
-                                    On Error Resume Next
-                                    Set targetWs = targetWb.Worksheets.Add(After:=targetWb.Worksheets(targetWb.Worksheets.count))
-                                    targetWs.Name = 获取唯一工作表名称(targetWb, sourceWs.Name)
-                                    On Error GoTo 0
-                                    
-                                    ' 提取数据
-                                    If shouldFullExtract Then
-                                        ' 整表提取
-                                        整表提取 sourceWs, targetWs
-                                    Else
-                                        ' 按行列提取
-                                        If extractRows <> "" And extractCols <> "" Then
-                                            按行列提取 sourceWs, targetWs, extractRows, extractCols
-                                        Else
-                                            ' 如果没有指定行列，则整表提取
-                                            整表提取 sourceWs, targetWs
-                                        End If
-                                    End If
-                                    
-                                    ' 删除空白行列，使表格紧凑
-                                    删除空白行列 targetWs
-                                    
-                                    processedCount = processedCount + 1
-                                    Debug.Print "已提取: " & sourceWb.Name & " - " & sourceWs.Name & " -> " & outputFileName
-                                Next wsItem
-                            End If
-                            
-                            sourceWb.Close SaveChanges:=False
-                        End If
-                    Next fileItem
                 End If
             End With
-        Next i
+        Next iCfg
+        
+        ' 外层：每个源文件只打开一次
+        Dim sourceWb As Workbook
+        Dim sourceWs As Worksheet
+        Dim targetWs As Worksheet
+        Dim targetWb As Workbook
+        Dim matchedSheets As Collection
+        Dim wsItem As Variant
+        Dim sheetInfoArr(1 To 5) As String
+        
+        For Each fileItem In fd.SelectedItems
+            On Error Resume Next
+            Set sourceWb = Workbooks.Open(CStr(fileItem), ReadOnly:=True)
+            If Err.Number <> 0 Then
+                Debug.Print "无法打开文件: " & fileItem
+                On Error GoTo 0
+                GoTo NextFile
+            End If
+            On Error GoTo 0
+            
+            ' 内层：对该文件应用所有配置行
+            For iCfg = 2 To lastRow
+                If Not cfgSkip(iCfg) Then
+                    sheetInfoArr(1) = cfgSheetInfo(iCfg, 1)
+                    sheetInfoArr(2) = cfgSheetInfo(iCfg, 2)
+                    sheetInfoArr(3) = cfgSheetInfo(iCfg, 3)
+                    sheetInfoArr(4) = cfgSheetInfo(iCfg, 4)
+                    sheetInfoArr(5) = cfgSheetInfo(iCfg, 5)
+                    Set matchedSheets = 查找所有匹配工作表(sourceWb, sheetInfoArr)
+                    If matchedSheets.count > 0 Then
+                        For Each wsItem In matchedSheets
+                            Set sourceWs = wsItem
+                            If Not outputDict.Exists(cfgOutputFile(iCfg)) Then
+                                Set targetWb = Workbooks.Add
+                                targetWb.SaveAs sourceWb.path & "\" & cfgOutputFile(iCfg) & ".xlsx"
+                                outputDict.Add cfgOutputFile(iCfg), targetWb
+                            Else
+                                Set targetWb = outputDict(cfgOutputFile(iCfg))
+                            End If
+                            On Error Resume Next
+                            Set targetWs = targetWb.Worksheets.Add(After:=targetWb.Worksheets(targetWb.Worksheets.count))
+                            targetWs.Name = 获取唯一工作表名称(targetWb, sourceWs.Name)
+                            On Error GoTo 0
+                            If cfgFullExtract(iCfg) Then
+                                整表提取 sourceWs, targetWs
+                            Else
+                                If Len(Trim$(cfgRows(iCfg))) > 0 Or Len(Trim$(cfgCols(iCfg))) > 0 Then
+                                    ExtractPartialData sourceWs, targetWs, cfgRows(iCfg), cfgCols(iCfg)
+                                Else
+                                    整表提取 sourceWs, targetWs
+                                End If
+                            End If
+                            删除空白行列 targetWs
+                            processedCount = processedCount + 1
+                            Debug.Print "已提取: " & sourceWb.Name & " - " & sourceWs.Name & " -> " & cfgOutputFile(iCfg)
+                        Next wsItem
+                    End If
+                End If
+            Next iCfg
+            
+            sourceWb.Close SaveChanges:=False
+NextFile:
+            Set sourceWb = Nothing
+        Next fileItem
         
         ' 保存所有输出文件
         Dim outputKey As Variant
@@ -162,6 +156,8 @@ Sub 批量提取工作表数据()
             outputDict(outputKey).Close
         Next outputKey
         
+        Application.Calculation = xlCalculationAutomatic
+        Application.EnableEvents = True
         Application.ScreenUpdating = True
         Application.DisplayAlerts = True
         
@@ -198,6 +194,8 @@ Function 查找所有匹配工作表(wb As Workbook, sheetInfo As Variant) As Collection
     Dim matchedSheets As Collection
     
     Set matchedSheets = New Collection
+    Dim addedNames As Object
+    Set addedNames = CreateObject("Scripting.Dictionary")
     
     ' 构建目标工作表名称（用于精确匹配）
     targetName = 构建工作表名称(sheetInfo)
@@ -207,6 +205,7 @@ Function 查找所有匹配工作表(wb As Workbook, sheetInfo As Variant) As Collection
     Set ws = wb.Worksheets(targetName)
     If Not ws Is Nothing Then
         matchedSheets.Add ws
+        addedNames(ws.Name) = 1
     End If
     On Error GoTo 0
     
@@ -215,19 +214,9 @@ Function 查找所有匹配工作表(wb As Workbook, sheetInfo As Variant) As Collection
         ' 检查是否包含所有关键词，并且不是已经添加的工作表
         If 工作表包含所有关键词(ws, sheetInfo) Then
             ' 检查是否已经添加过这个工作表
-            Dim alreadyAdded As Boolean
-            alreadyAdded = False
-            
-            Dim existingWs As Variant
-            For Each existingWs In matchedSheets
-                If existingWs.Name = ws.Name Then
-                    alreadyAdded = True
-                    Exit For
-                End If
-            Next existingWs
-            
-            If Not alreadyAdded Then
+            If Not addedNames.Exists(ws.Name) Then
                 matchedSheets.Add ws
+                addedNames(ws.Name) = 1
             End If
         End If
     Next ws
@@ -341,68 +330,210 @@ Sub 整表提取(sourceWs As Worksheet, targetWs As Worksheet)
 End Sub
 
 ' 按行列提取（支持列的离散/范围语法：如 "B,BO,BQ,BP" 或 "B,BO:BP"）
-Sub 按行列提取(sourceWs As Worksheet, targetWs As Worksheet, rowsStr As String, colsStr As String)
-    Dim rowArray As Variant
-    Dim colArray As Variant
-    Dim i As Long, j As Long
+Sub ExtractPartialData(sourceWs As Worksheet, targetWs As Worksheet, rowsStr As String, colsStr As String)
+    Dim rowIndexes As Collection
+    Dim colIndexes As Collection
+    Dim sourceRow As Variant, sourceCol As Variant
     Dim targetRow As Long, targetCol As Long
-    Dim seg As String
-    Dim parts As Variant
-    Dim sourceRow As Long
-    Dim sourceCol As Long
-    Dim startCol As Long, endCol As Long, tmpCol As Long
-    
-    ' 解析行字符串（如"2,3,4"）
-    rowArray = Split(Replace(rowsStr, " ", ""), ",")
-    
-    ' 解析列字符串（如"A,B,C"，也支持 B,BO,BQ,BP 或 B,BO:BP 这样的组合）
-    colArray = Split(Replace(colsStr, " ", ""), ",")
-    
-    targetRow = 1
-    For i = 0 To UBound(rowArray)
-        If IsNumeric(rowArray(i)) Then
-            sourceRow = CLng(rowArray(i))
-            
-            targetCol = 1
-            For j = 0 To UBound(colArray)
-                seg = Trim(CStr(colArray(j)))
-                If Len(seg) > 0 Then
-                    ' 支持单列：B；范围：BO:BP；以及组合：B,BO,BQ,BP / B,BO:BP
-                    If InStr(1, seg, ":", vbTextCompare) > 0 Then
-                        parts = Split(seg, ":")
-                        If UBound(parts) >= 1 Then
-                            startCol = 列字母转数字(CStr(parts(0)))
-                            endCol = 列字母转数字(CStr(parts(1)))
-                            If startCol > 0 And endCol > 0 Then
-                                If startCol > endCol Then
-                                    tmpCol = startCol
-                                    startCol = endCol
-                                    endCol = tmpCol
-                                End If
-                                For sourceCol = startCol To endCol
-                                    sourceWs.Cells(sourceRow, sourceCol).Copy
-                                    targetWs.Cells(targetRow, targetCol).PasteSpecial Paste:=xlPasteAll
-                                    targetCol = targetCol + 1
-                                Next sourceCol
-                            End If
-                        End If
-                    Else
-                        sourceCol = 列字母转数字(seg)
-                        If sourceCol > 0 Then
-                            sourceWs.Cells(sourceRow, sourceCol).Copy
-                            targetWs.Cells(targetRow, targetCol).PasteSpecial Paste:=xlPasteAll
-                            targetCol = targetCol + 1
-                        End If
-                    End If
-                End If
-            Next j
-            
-            targetRow = targetRow + 1
-        End If
-    Next i
-    
-    Application.CutCopyMode = False
+    Dim lastRow As Long, lastCol As Long
+
+    lastRow = GetLastUsedRow(sourceWs)
+    lastCol = GetLastUsedCol(sourceWs)
+    If lastRow <= 0 Or lastCol <= 0 Then Exit Sub
+
+    Set rowIndexes = ParseRowIndexes(rowsStr, lastRow)
+    Set colIndexes = ParseColIndexes(colsStr, lastCol)
+
+    If rowIndexes.Count = 0 Or colIndexes.Count = 0 Then Exit Sub
+
+    ' [优化B] 读入二维数组，整块写出，消除逐格剪贴板操作
+    Dim nR As Long, nC As Long, ri As Long, ci As Long
+    Dim dataArr() As Variant
+    nR = rowIndexes.Count
+    nC = colIndexes.Count
+    If nR = 0 Or nC = 0 Then Exit Sub
+    ReDim dataArr(1 To nR, 1 To nC)
+    ri = 0
+    For Each sourceRow In rowIndexes
+        ri = ri + 1
+        ci = 0
+        For Each sourceCol In colIndexes
+            ci = ci + 1
+            dataArr(ri, ci) = sourceWs.Cells(CLng(sourceRow), CLng(sourceCol)).Value
+        Next sourceCol
+    Next sourceRow
+    targetWs.Cells(1, 1).Resize(nR, nC).Value = dataArr
 End Sub
+
+Private Function ParseRowIndexes(rowsStr As String, maxRow As Long) As Collection
+    Dim result As New Collection
+    Dim norm As String
+    Dim segs As Variant
+    Dim seg As Variant
+    Dim i As Long
+
+    norm = NormalizeRangeSpec(rowsStr)
+    If Len(norm) = 0 Then
+        For i = 1 To maxRow
+            result.Add i
+        Next i
+        Set ParseRowIndexes = result
+        Exit Function
+    End If
+
+    segs = Split(norm, ",")
+    For Each seg In segs
+        AddIndexSegment CStr(seg), maxRow, result, True
+    Next seg
+
+    If result.Count = 0 Then
+        For i = 1 To maxRow
+            result.Add i
+        Next i
+    End If
+
+    Set ParseRowIndexes = result
+End Function
+
+Private Function ParseColIndexes(colsStr As String, maxCol As Long) As Collection
+    Dim result As New Collection
+    Dim norm As String
+    Dim segs As Variant
+    Dim seg As Variant
+    Dim i As Long
+
+    norm = NormalizeRangeSpec(colsStr)
+    If Len(norm) = 0 Then
+        For i = 1 To maxCol
+            result.Add i
+        Next i
+        Set ParseColIndexes = result
+        Exit Function
+    End If
+
+    segs = Split(norm, ",")
+    For Each seg In segs
+        AddIndexSegment CStr(seg), maxCol, result, False
+    Next seg
+
+    If result.Count = 0 Then
+        For i = 1 To maxCol
+            result.Add i
+        Next i
+    End If
+
+    Set ParseColIndexes = result
+End Function
+
+Private Sub AddIndexSegment(seg As String, maxValue As Long, ByRef result As Collection, isRow As Boolean)
+    Dim parts As Variant
+    Dim startNo As Long, endNo As Long, n As Long, tmpNo As Long
+
+    seg = Trim$(seg)
+    If Len(seg) = 0 Then Exit Sub
+
+    If InStr(1, seg, ":", vbTextCompare) > 0 Then
+        parts = Split(seg, ":")
+        If UBound(parts) >= 1 Then
+            startNo = TokenToIndex(CStr(parts(0)), isRow)
+            endNo = TokenToIndex(CStr(parts(1)), isRow)
+            If startNo > 0 And endNo > 0 Then
+                If startNo > endNo Then
+                    tmpNo = startNo
+                    startNo = endNo
+                    endNo = tmpNo
+                End If
+                If startNo < 1 Then startNo = 1
+                If endNo > maxValue Then endNo = maxValue
+                For n = startNo To endNo
+                    result.Add n
+                Next n
+            End If
+        End If
+    Else
+        startNo = TokenToIndex(seg, isRow)
+        If startNo >= 1 And startNo <= maxValue Then
+            result.Add startNo
+        End If
+    End If
+End Sub
+
+Private Function TokenToIndex(token As String, isRow As Boolean) As Long
+    token = Trim$(token)
+    If Len(token) = 0 Then
+        TokenToIndex = 0
+        Exit Function
+    End If
+
+    If IsNumeric(token) Then
+        TokenToIndex = CLng(token)
+    ElseIf isRow Then
+        TokenToIndex = 0
+    Else
+        TokenToIndex = ColumnLetterToNumber(token)
+    End If
+End Function
+
+Private Function ColumnLetterToNumber(colLetter As String) As Long
+    Dim i As Long
+    Dim result As Long
+    Dim ch As String
+
+    colLetter = UCase$(Trim$(colLetter))
+    result = 0
+
+    For i = 1 To Len(colLetter)
+        ch = Mid$(colLetter, i, 1)
+        If ch < "A" Or ch > "Z" Then
+            ColumnLetterToNumber = 0
+            Exit Function
+        End If
+        result = result * 26 + (Asc(ch) - 64)
+    Next i
+
+    ColumnLetterToNumber = result
+End Function
+
+Private Function NormalizeRangeSpec(text As String) As String
+    Dim s As String
+    s = CStr(text)
+    s = Replace(s, " ", "")
+    s = Replace(s, vbTab, "")
+    s = Replace(s, ChrW(&HFF0C), ",")
+    s = Replace(s, ChrW(&H3001), ",")
+    s = Replace(s, ChrW(&HFF1B), ",")
+    s = Replace(s, ";", ",")
+    s = Replace(s, ChrW(&HFF1A), ":")
+    NormalizeRangeSpec = s
+End Function
+
+Private Function GetLastUsedRow(ws As Worksheet) As Long
+    On Error GoTo Fail
+    Dim rng As Range
+    Set rng = ws.Cells.Find("*", LookIn:=xlValues, SearchOrder:=xlByRows, SearchDirection:=xlPrevious)
+    If rng Is Nothing Then
+        GetLastUsedRow = 0
+    Else
+        GetLastUsedRow = rng.Row
+    End If
+    Exit Function
+Fail:
+    GetLastUsedRow = 0
+End Function
+
+Private Function GetLastUsedCol(ws As Worksheet) As Long
+    On Error GoTo Fail
+    Dim rng As Range
+    Set rng = ws.Cells.Find("*", LookIn:=xlValues, SearchOrder:=xlByColumns, SearchDirection:=xlPrevious)
+    If rng Is Nothing Then
+        GetLastUsedCol = 0
+    Else
+        GetLastUsedCol = rng.Column
+    End If
+    Exit Function
+Fail:
+    GetLastUsedCol = 0
+End Function
 
 ' 删除空白行列，使表格紧凑
 Sub 删除空白行列(ws As Worksheet)
@@ -416,20 +547,26 @@ Sub 删除空白行列(ws As Worksheet)
     
     If lastRow = 0 Or lastCol = 0 Then Exit Sub
     
-    ' 删除空行
+    ' [优化C] 先收集空行，最后 Union 一次删除
+    Dim delRows As Range
     For row = lastRow To 1 Step -1
         hasData = False
         For col = 1 To lastCol
-            If Len(Trim(CStr(ws.Cells(row, col).value))) > 0 Then
+            If Len(Trim(CStr(ws.Cells(row, col).Value))) > 0 Then
                 hasData = True
                 Exit For
             End If
         Next col
-        
         If Not hasData Then
-            ws.Rows(row).Delete
+            If delRows Is Nothing Then
+                Set delRows = ws.Rows(row)
+            Else
+                Set delRows = Union(delRows, ws.Rows(row))
+            End If
         End If
     Next row
+    If Not delRows Is Nothing Then delRows.Delete Shift:=xlUp
+    Set delRows = Nothing
     
     ' 重新获取数据范围（因为删除了行）
     lastRow = 获取最后有数据的行(ws)
@@ -437,20 +574,26 @@ Sub 删除空白行列(ws As Worksheet)
     
     If lastRow = 0 Or lastCol = 0 Then Exit Sub
     
-    ' 删除空列
+    ' [优化C] 先收集空列，最后 Union 一次删除
+    Dim delCols As Range
     For col = lastCol To 1 Step -1
         hasData = False
         For row = 1 To lastRow
-            If Len(Trim(CStr(ws.Cells(row, col).value))) > 0 Then
+            If Len(Trim(CStr(ws.Cells(row, col).Value))) > 0 Then
                 hasData = True
                 Exit For
             End If
         Next row
-        
         If Not hasData Then
-            ws.Columns(col).Delete
+            If delCols Is Nothing Then
+                Set delCols = ws.Columns(col)
+            Else
+                Set delCols = Union(delCols, ws.Columns(col))
+            End If
         End If
     Next col
+    If Not delCols Is Nothing Then delCols.Delete Shift:=xlToLeft
+    Set delCols = Nothing
 End Sub
 
 ' 获取最后有数据的行

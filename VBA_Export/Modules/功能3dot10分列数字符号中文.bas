@@ -50,6 +50,9 @@ Public Sub 功能3dot10_分列数字符号中文()
     Dim i As Long
     Dim t0 As Double
     Dim symChars As String
+    Dim srcArr As Variant
+    Dim outArr As Variant
+    Dim rowCount As Long
 
     On Error GoTo ErrHandler
 
@@ -113,15 +116,25 @@ Public Sub 功能3dot10_分列数字符号中文()
     ws.Columns(colIdx + 1).Insert
 
     ' 3. 循环逐行分列
-    For r = 1 To lastRow
-        cellVal = Trim(CStr(ws.Cells(r, colIdx).value))
+    rowCount = lastRow
+    If rowCount = 1 Then
+        ReDim srcArr(1 To 1, 1 To 1)
+        srcArr(1, 1) = ws.Cells(1, colIdx).Value2
+    Else
+        srcArr = ws.Range(ws.Cells(1, colIdx), ws.Cells(lastRow, colIdx)).Value2
+    End If
+
+    ReDim outArr(1 To rowCount, 1 To 3)
+    For r = 1 To rowCount
+        cellVal = Trim$(CStr(srcArr(r, 1)))
         Call 拆分数字符号中文(cellVal, symChars, segNum, segSym, segChn)
 
-        ' outCols(1)~(3) 分别是 1/2/3，表示数字/符号/中文
-        ws.Cells(r, colIdx).value = 取分段(outCols(1), segNum, segSym, segChn)
-        ws.Cells(r, colIdx + 1).value = 取分段(outCols(2), segNum, segSym, segChn)
-        ws.Cells(r, colIdx + 2).value = 取分段(outCols(3), segNum, segSym, segChn)
+        outArr(r, 1) = 取分段(outCols(1), segNum, segSym, segChn)
+        outArr(r, 2) = 取分段(outCols(2), segNum, segSym, segChn)
+        outArr(r, 3) = 取分段(outCols(3), segNum, segSym, segChn)
     Next r
+
+    ws.Range(ws.Cells(1, colIdx), ws.Cells(lastRow, colIdx + 2)).Value2 = outArr
 
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True

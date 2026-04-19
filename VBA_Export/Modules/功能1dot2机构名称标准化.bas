@@ -83,6 +83,24 @@ Function 获取映射名称(originalName As String, mappingDict As Object) As String
     '如果没有找到映射，返回原始名称
     获取映射名称 = originalName
 End Function
+
+Private Function 获取映射名称_缓存键(ByVal originalName As String, ByVal mappingDict As Object, ByVal dictKeys As Variant) As String
+    Dim key As Variant
+
+    If mappingDict.Exists(originalName) Then
+        获取映射名称_缓存键 = mappingDict(originalName)
+        Exit Function
+    End If
+
+    For Each key In dictKeys
+        If InStr(1, originalName, CStr(key), vbTextCompare) > 0 Then
+            获取映射名称_缓存键 = mappingDict(key)
+            Exit Function
+        End If
+    Next key
+
+    获取映射名称_缓存键 = originalName
+End Function
 '简单测试一下功能
 Sub 测试映射表有没有问题()
     Dim mappingDict As Object
@@ -132,6 +150,8 @@ Sub 批量修改分机构文件()
     If fd.Show Then
         Application.ScreenUpdating = False
         Application.DisplayAlerts = False
+        Application.Calculation = xlCalculationManual
+        Application.EnableEvents = False
         
         totalMapped = 0
         processedFiles = 0
@@ -177,6 +197,8 @@ NextFile:
         
         Application.ScreenUpdating = True
         Application.DisplayAlerts = True
+        Application.Calculation = xlCalculationAutomatic
+        Application.EnableEvents = True
         
         RunLog_WriteRow "1.2 机构名称标准化", "完成", "", "", "", "", "Done", CStr(Round(Timer - t0, 2))
         '显示结果
@@ -213,11 +235,17 @@ Function 映射分机构工作表(ws As Worksheet, mappingDict As Object) As Long
         Exit Function
     End If
     
-    Dim lastRow As Long, lastCol As Long
-    Dim i As Long, j As Long
+    Dim lastRow As Long
+    Dim i As Long
     Dim mappedCount As Long
     Dim dataStartRow As Long
+    Dim 列A索引 As Long, 列B索引 As Long
     Dim 需要映射A列 As Boolean, 需要映射B列 As Boolean
+    Dim arrA As Variant, arrB As Variant, workArr As Variant
+    Dim dictKeys As Variant
+    Dim arrRows As Long
+    Dim originalName As String
+    Dim mappedName As String
     
     '初始化
     mappedCount = 0
@@ -232,7 +260,6 @@ Function 映射分机构工作表(ws As Worksheet, mappingDict As Object) As Long
     On Error Resume Next
     lastRow = ws.Cells(ws.Rows.count, 1).End(xlUp).row
     If ws.Cells(ws.Rows.count, 2).End(xlUp).row > lastRow Then lastRow = ws.Cells(ws.Rows.count, 2).End(xlUp).row
-    lastCol = ws.Cells(1, ws.Columns.count).End(xlToLeft).Column
     On Error GoTo 0
     
     '如果数据不足2行，直接返回
@@ -248,62 +275,55 @@ Function 映射分机构工作表(ws As Worksheet, mappingDict As Object) As Long
     列A索引 = 1
     列B索引 = 2
     
+    arrA = ws.Range(ws.Cells(dataStartRow, 列A索引), ws.Cells(lastRow, 列A索引)).Value2
+    arrB = ws.Range(ws.Cells(dataStartRow, 列B索引), ws.Cells(lastRow, 列B索引)).Value2
+    dictKeys = mappingDict.keys
+
     '检查A列是否为空
     需要映射A列 = False
     需要映射B列 = False
-    
-    '优先检查A列是否有数据
-    For i = dataStartRow To lastRow
-        If Trim(ws.Cells(i, 列A索引).value) <> "" Then
+    For i = 1 To UBound(arrA, 1)
+        If Trim(CStr(arrA(i, 1))) <> "" Then
             需要映射A列 = True
             Exit For
         End If
     Next i
-    
-    '如果A列没有数据，则检查B列
     If Not 需要映射A列 Then
-        For i = dataStartRow To lastRow
-            If Trim(ws.Cells(i, 列B索引).value) <> "" Then
+        For i = 1 To UBound(arrB, 1)
+            If Trim(CStr(arrB(i, 1))) <> "" Then
                 需要映射B列 = True
                 Exit For
             End If
         Next i
     End If
-    
-    '执行映射（直接修改工作表数据）
+
     If 需要映射A列 Then
-        '映射A列
-        For i = dataStartRow To lastRow
-            Dim originalName As String
-            Dim mappedName As String
-            
-            originalName = Trim(ws.Cells(i, 列A索引).value)
-            If originalName <> "" Then
-                '获取映射后的名称
-                mappedName = 获取映射名称(originalName, mappingDict)
-                
-                '如果映射后的名称与原始名称不同，则修改单元格
-                If mappedName <> originalName Then
-                    ws.Cells(i, 列A索引).value = mappedName
-                    mappedCount = mappedCount + 1
-                End If
-            End If
-        Next i
+        workArr = arrA
     ElseIf 需要映射B列 Then
-        '映射B列
-        For i = dataStartRow To lastRow
-            originalName = Trim(ws.Cells(i, 列B索引).value)
-            If originalName <> "" Then
-                '获取映射后的名称
-                mappedName = 获取映射名称(originalName, mappingDict)
-                
-                '如果映射后的名称与原始名称不同，则修改单元格
-                If mappedName <> originalName Then
-                    ws.Cells(i, 列B索引).value = mappedName
-                    mappedCount = mappedCount + 1
-                End If
+        workArr = arrB
+    Else
+        映射分机构工作表 = 0
+        Exit Function
+    End If
+
+    arrRows = UBound(workArr, 1)
+    For i = 1 To arrRows
+        originalName = Trim(CStr(workArr(i, 1)))
+        If originalName <> "" Then
+            mappedName = 获取映射名称_缓存键(originalName, mappingDict, dictKeys)
+            If mappedName <> originalName Then
+                workArr(i, 1) = mappedName
+                mappedCount = mappedCount + 1
             End If
-        Next i
+        End If
+    Next i
+
+    If mappedCount > 0 Then
+        If 需要映射A列 Then
+            ws.Range(ws.Cells(dataStartRow, 列A索引), ws.Cells(lastRow, 列A索引)).Value2 = workArr
+        Else
+            ws.Range(ws.Cells(dataStartRow, 列B索引), ws.Cells(lastRow, 列B索引)).Value2 = workArr
+        End If
     End If
     
     映射分机构工作表 = mappedCount

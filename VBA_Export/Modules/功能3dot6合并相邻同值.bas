@@ -35,6 +35,12 @@ Public Sub 合并相邻同值单元格()
     Dim r As Long
     Dim runStart As Long
     Dim cVal As Variant
+    Dim colArr As Variant
+    Dim rowArr As Variant
+    Dim baseCol As Long
+    Dim baseRow As Long
+    Dim rowLimit As Long
+    Dim colLimit As Long
     Dim t0 As Double
     Dim mergeDir As String
     Dim resultMsg As String
@@ -75,37 +81,43 @@ Public Sub 合并相邻同值单元格()
     If mergeDir = "竖向" Then
         ' 按列处理：每列从上到下找连续同值段并合并
         For colIdx = 1 To sel.Columns.count
-            startRow = sel.Cells(1, colIdx).row
-            endRow = sel.Cells(sel.Rows.count, colIdx).row
-            r = startRow
-            Do While r <= endRow
-                cVal = ws.Cells(r, sel.Cells(1, colIdx).Column).value
+            baseCol = sel.Cells(1, colIdx).Column
+            startRow = sel.Cells(1, colIdx).Row
+            endRow = sel.Cells(sel.Rows.Count, colIdx).Row
+            colArr = ws.Range(ws.Cells(startRow, baseCol), ws.Cells(endRow, baseCol)).Value2
+            rowLimit = UBound(colArr, 1)
+            r = 1
+            Do While r <= rowLimit
+                cVal = colArr(r, 1)
                 runStart = r
                 r = r + 1
-                Do While r <= endRow And CellsValueEqual(ws.Cells(r, sel.Cells(1, colIdx).Column).value, cVal)
+                Do While r <= rowLimit And CellsValueEqual(colArr(r, 1), cVal)
                     r = r + 1
                 Loop
                 If r - 1 > runStart Then
-                    ws.Range(ws.Cells(runStart, sel.Cells(1, colIdx).Column), ws.Cells(r - 1, sel.Cells(1, colIdx).Column)).Merge
+                    ws.Range(ws.Cells(startRow + runStart - 1, baseCol), ws.Cells(startRow + r - 2, baseCol)).Merge
                 End If
             Loop
         Next colIdx
         resultMsg = "已按列合并竖向相邻同值"
     Else
         ' 按行处理：每行从左到右找横向连续同值段并合并
-        For rowIdx = 1 To sel.Rows.count
+        For rowIdx = 1 To sel.Rows.Count
+            baseRow = sel.Cells(rowIdx, 1).Row
             startCol = sel.Cells(rowIdx, 1).Column
-            endCol = sel.Cells(rowIdx, sel.Columns.count).Column
-            c = startCol
-            Do While c <= endCol
-                cVal = ws.Cells(sel.Cells(rowIdx, 1).row, c).value
+            endCol = sel.Cells(rowIdx, sel.Columns.Count).Column
+            rowArr = ws.Range(ws.Cells(baseRow, startCol), ws.Cells(baseRow, endCol)).Value2
+            colLimit = UBound(rowArr, 2)
+            c = 1
+            Do While c <= colLimit
+                cVal = rowArr(1, c)
                 runStart = c
                 c = c + 1
-                Do While c <= endCol And CellsValueEqual(ws.Cells(sel.Cells(rowIdx, 1).row, c).value, cVal)
+                Do While c <= colLimit And CellsValueEqual(rowArr(1, c), cVal)
                     c = c + 1
                 Loop
                 If c - 1 > runStart Then
-                    ws.Range(ws.Cells(sel.Cells(rowIdx, 1).row, runStart), ws.Cells(sel.Cells(rowIdx, 1).row, c - 1)).Merge
+                    ws.Range(ws.Cells(baseRow, startCol + runStart - 1), ws.Cells(baseRow, startCol + c - 2)).Merge
                 End If
             Loop
         Next rowIdx

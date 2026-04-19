@@ -48,28 +48,42 @@ Function 删除外资行(ws As Worksheet, foreignBankDict As Object) As Long
     Dim i As Long
     Dim deletedRows As Long
     Dim bankName As String
-    Dim isForeign As Boolean
-    
+    Dim colA As Variant
+    Dim marked() As Boolean
+    Dim startRow As Long, endRow As Long
+
     deletedRows = 0
     lastRow = ws.Cells(ws.Rows.count, 1).End(xlUp).row
-    
-    '从最后一行向上遍历，避免删除行后行号变化
-    For i = lastRow To 1 Step -1
-        bankName = Trim(ws.Cells(i, 1).value) 'A列：机构名称
-        
+    If lastRow < 1 Then Exit Function
+
+    colA = ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, 1)).Value2
+    ReDim marked(1 To lastRow)
+
+    For i = 1 To lastRow
+        bankName = Trim(CStr(colA(i, 1)))
         If bankName <> "" Then
-            '检查该机构是否为外资行
             If foreignBankDict.Exists(bankName) Then
-                isForeign = (foreignBankDict(bankName) = 1)
-                
-                If isForeign Then
-                    '删除外资行
-                    ws.Rows(i).Delete Shift:=xlUp
-                    deletedRows = deletedRows + 1
+                If CLng(Val(foreignBankDict(bankName))) = 1 Then
+                    marked(i) = True
                 End If
             End If
         End If
     Next i
+
+    i = lastRow
+    Do While i >= 1
+        If marked(i) Then
+            endRow = i
+            Do While i >= 1 And marked(i)
+                i = i - 1
+            Loop
+            startRow = i + 1
+            ws.Rows(startRow & ":" & endRow).Delete Shift:=xlUp
+            deletedRows = deletedRows + (endRow - startRow + 1)
+        Else
+            i = i - 1
+        End If
+    Loop
     
     删除外资行 = deletedRows
 End Function
@@ -80,32 +94,32 @@ Function 删除外资行增强版(ws As Worksheet, foreignBankDict As Object) As Long
     Dim i As Long
     Dim deletedRows As Long
     Dim bankName As String
-    Dim isForeign As Boolean
     Dim dictKey As Variant
-    
+    Dim dictKeys As Variant
+    Dim colA As Variant
+    Dim marked() As Boolean
+    Dim startRow As Long, endRow As Long
+
     deletedRows = 0
     lastRow = ws.Cells(ws.Rows.count, 1).End(xlUp).row
-    
-    '从最后一行向上遍历
-    For i = lastRow To 1 Step -1
-        bankName = Trim(ws.Cells(i, 1).value)
-        
+    If lastRow < 1 Then Exit Function
+
+    dictKeys = foreignBankDict.keys
+    colA = ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, 1)).Value2
+    ReDim marked(1 To lastRow)
+
+    For i = 1 To lastRow
+        bankName = Trim(CStr(colA(i, 1)))
         If bankName <> "" Then
-            '精确匹配
             If foreignBankDict.Exists(bankName) Then
-                isForeign = (foreignBankDict(bankName) = 1)
-                If isForeign Then
-                    ws.Rows(i).Delete Shift:=xlUp
-                    deletedRows = deletedRows + 1
+                If CLng(Val(foreignBankDict(bankName))) = 1 Then
+                    marked(i) = True
                 End If
             Else
-                '模糊匹配：检查字典键是否包含在机构名称中
-                For Each dictKey In foreignBankDict.keys
-                    If InStr(1, bankName, dictKey, vbTextCompare) > 0 Then
-                        isForeign = (foreignBankDict(dictKey) = 1)
-                        If isForeign Then
-                            ws.Rows(i).Delete Shift:=xlUp
-                            deletedRows = deletedRows + 1
+                For Each dictKey In dictKeys
+                    If InStr(1, bankName, CStr(dictKey), vbTextCompare) > 0 Then
+                        If CLng(Val(foreignBankDict(dictKey))) = 1 Then
+                            marked(i) = True
                             Exit For
                         End If
                     End If
@@ -113,6 +127,21 @@ Function 删除外资行增强版(ws As Worksheet, foreignBankDict As Object) As Long
             End If
         End If
     Next i
+
+    i = lastRow
+    Do While i >= 1
+        If marked(i) Then
+            endRow = i
+            Do While i >= 1 And marked(i)
+                i = i - 1
+            Loop
+            startRow = i + 1
+            ws.Rows(startRow & ":" & endRow).Delete Shift:=xlUp
+            deletedRows = deletedRows + (endRow - startRow + 1)
+        Else
+            i = i - 1
+        End If
+    Loop
     
     删除外资行增强版 = deletedRows
 End Function
@@ -308,22 +337,31 @@ Sub 删除外资行_批量()
             savePath = Left(selectedFile, InStrRev(selectedFile, "\")) & newName
             
             '保存副本
+            Dim saveOk As Boolean
+            Dim saveErrNum As Long
+            saveOk = False
+            saveErrNum = 0
             On Error Resume Next
+            Err.Clear
             tempWb.SaveAs fileName:=savePath, FileFormat:=sourceWb.FileFormat
-            If Err.Number <> 0 Then
-                '如果保存失败，尝试使用默认格式
-                tempWb.SaveAs fileName:=savePath, FileFormat:=xlOpenXMLWorkbook
-            End If
-            
             If Err.Number = 0 Then
+                saveOk = True
+            Else
+                Err.Clear
+                tempWb.SaveAs fileName:=savePath, FileFormat:=xlOpenXMLWorkbook
+                saveOk = (Err.Number = 0)
+                saveErrNum = Err.Number
+            End If
+            On Error GoTo 0
+            
+            If saveOk Then
                 保存成功文件数 = 保存成功文件数 + 1
                 RunLog_WriteRow "1.3 删除分机构表的外资行", "处理文件", newName, "", "", "成功", "删除 " & deletedRows & " 行外资行", ""
                 Debug.Print "文件 " & fileCount & ": " & newName & " (删除 " & deletedRows & " 行外资行)"
             Else
-                RunLog_WriteRow "1.3 删除分机构表的外资行", "处理文件", newName, "", "", "失败", "保存失败 " & Err.Number, ""
+                RunLog_WriteRow "1.3 删除分机构表的外资行", "处理文件", newName, "", "", "失败", "保存失败 " & saveErrNum, ""
                 Debug.Print "文件 " & fileCount & ": 保存失败 - " & newName
             End If
-            On Error GoTo 0
             
             '关闭工作簿
             sourceWb.Close False
@@ -331,7 +369,6 @@ Sub 删除外资行_批量()
             Set sourceWb = Nothing
             Set tempWb = Nothing
             
-            Application.Wait (Now + TimeValue("0:00:01"))
             
 NextFile:
         Next selectedFile

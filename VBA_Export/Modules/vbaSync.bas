@@ -3,17 +3,17 @@ Option Explicit
 
 ' Requires reference: Microsoft Visual Basic for Applications Extensibility 5.3 (Tools -> References -> check it)
 ' Batch export/import VBA modules. Export: standard modules, class modules, document modules, forms. Skip by module name.
-' 运行日志写入 RUNLOG_SHEET_NAME 指定工作表（运行日志），若不存在则创建。
-' 约定：本模块不跨模块调用，避免模块加载顺序不确定导致运行时错误。
+' д RUNLOG_SHEET_NAME 
+' 鲻
 '
 ' ================== Export ==================
 ' exportRoot: empty = ThisWorkbook.Path\VBA_Export\
 ' charset: used for file read/write (default GBK)
 ' skipModules: comma-separated module names, e.g. "vbaSync"
 Private Const RUNLOG_SHEET_NAME As String = "运行日志"
-' 改为 False 可关闭运行日志写入。表头12列，每条操作一行；用户名/电脑名留空避免 Environ 闪退。
+'  False д12УУ/ Environ 
 Private Const ENABLE_RUNLOG As Boolean = True
-' 运行日志表列号（12列）：序号、时间戳、用户名、功能模块、操作、记录ID/对象、操作前值、操作后值、结果、详细信息、耗时(秒)、电脑名
+' к12У顢ID/()
 Private Const RUNLOG_COL_SEQ As Long = 1
 Private Const RUNLOG_COL_TIME As Long = 2
 Private Const RUNLOG_COL_USER As Long = 3
@@ -66,7 +66,7 @@ Public Sub ExportVBAModules( _
     Dim outName As String
     skipArr = BuildSkipList(skipModules)
 
-    RunLog_WriteRow "vba导出", "导出开始", exportRoot, "", "", "", "开始", ""
+    RunLog_WriteRow "vba", "", exportRoot, "", "", "", "", ""
 
     For Each vbComp In vbProj.VBComponents
         If IsSkipped(vbComp.Name, skipArr) Then
@@ -92,18 +92,18 @@ Public Sub ExportVBAModules( _
                     outName = vbComp.Name & ".frm"
                     vbComp.Export targetPath
             End Select
-            RunLog_WriteRow "vba导出", "导出", outName, "", "", "成功", "OK", ""
+            RunLog_WriteRow "vba", "", outName, "", "", "", "OK", ""
             On Error GoTo 0
             GoTo NextExport
 ExportErr:
-            RunLog_WriteRow "vba导出", "导出", outName, "", "", "失败", Err.Number & " " & Err.Description, ""
+            RunLog_WriteRow "vba", "", outName, "", "", "", Err.Number & " " & Err.Description, ""
             On Error GoTo 0
 NextExport:
         End If
     Next vbComp
 
-    RunLog_WriteRow "vba导出", "导出完成", "", "", "", "", "Done", CStr(Round(Timer - t0, 2))
-    MsgBox "VBA modules exported. Folder:" & vbCrLf & exportRoot & vbCrLf & "详见运行日志工作表。", vbInformation
+    RunLog_WriteRow "vba", "", "", "", "", "", "Done", CStr(Round(Timer - t0, 2))
+    MsgBox "VBA modules exported. Folder:" & vbCrLf & exportRoot & vbCrLf & "", vbInformation
     Exit Sub
 
 ErrTrust:
@@ -148,18 +148,18 @@ Public Sub ImportVBAModules( _
     EnsureRunLogSheet
     Dim t0 As Double: t0 = Timer
 
-    RunLog_WriteRow "vba导入", "导入开始", importRoot, "", "", "", "开始", ""
+    RunLog_WriteRow "vba", "", importRoot, "", "", "", "", ""
 
     ' 1) Backup current VBA to export\backup\yyyy-mm-dd_hh-nn-ss\
     backupPath = importRoot & "backup\" & Format(Now, "yyyy-mm-dd_hh-nn-ss") & "\"
     EnsureFolder importRoot & "backup"
     EnsureFolder Left(backupPath, Len(backupPath) - 1)
     BackupCurrentProject vbProj, backupPath, charset
-    RunLog_WriteRow "vba导入", "备份", backupPath, "", "", "成功", "OK", ""
+    RunLog_WriteRow "vba", "", backupPath, "", "", "", "OK", ""
 
     ' 2) Clear all removable components (StdModule, ClassModule, MSForm); keep Document (ThisWorkbook, Sheets)
     ClearRemovableComponents vbProj
-    RunLog_WriteRow "vba导入", "清空旧模块", "", "", "", "成功", "OK", ""
+    RunLog_WriteRow "vba", "", "", "", "", "", "OK", ""
 
     Set folderRoot = fso.GetFolder(importRoot)
     skipArr = BuildSkipList(skipModules)
@@ -174,8 +174,8 @@ Public Sub ImportVBAModules( _
         ImportOneFile vbProj, f, skipArr, charset
     Next f
 
-    RunLog_WriteRow "vba导入", "导入完成", "", "", "", "", "Done", CStr(Round(Timer - t0, 2))
-    MsgBox "VBA modules imported. 详见运行日志工作表。", vbInformation
+    RunLog_WriteRow "vba", "", "", "", "", "", "Done", CStr(Round(Timer - t0, 2))
+    MsgBox "VBA modules imported. ", vbInformation
     Exit Sub
 
 ErrTrust:
@@ -187,7 +187,7 @@ ErrTrust:
 End Sub
 
 ' Backup entire current VBA project to backupRoot (Modules\, Classes\, Documents\, Forms\). No skip.
-' 若报「变量未定义」或「用户定义类型未定义」：工具 -> 引用 -> 勾选 "Microsoft Visual Basic for Applications Extensibility 5.3"
+' δ塹δ塹 ->  ->  "Microsoft Visual Basic for Applications Extensibility 5.3"
 Private Sub BackupCurrentProject(ByVal vbProj As VBIDE.VBProject, ByVal backupRoot As String, ByVal charset As String)
     Dim vbComp As VBIDE.VBComponent
     Dim pathModules As String
@@ -242,10 +242,10 @@ Private Sub ClearRemovableComponents(ByVal vbProj As VBIDE.VBProject)
     Next i
 End Sub
 
-' ================== 运行日志 (RunLog) 写入工作表 ==================
-' 表头12列：序号、时间戳、用户名、功能模块、操作、记录ID/对象、操作前值、操作后值、结果、详细信息、耗时(秒)、电脑名（用户名/电脑名留空防闪退）
+' ==================  (RunLog) д ==================
+' 12У顢ID/()/
 
-' 确保运行日志工作表存在并写表头（12列）；全程 On Error Resume Next 防止闪退。
+' д12У On Error Resume Next 
 Private Sub EnsureRunLogSheet()
     If Not ENABLE_RUNLOG Then Exit Sub
     Dim ws As Worksheet
@@ -257,52 +257,50 @@ Private Sub EnsureRunLogSheet()
     End If
     If ws Is Nothing Then Exit Sub
     With ws
-        .Cells(1, RUNLOG_COL_SEQ).value = "序号"
-        .Cells(1, RUNLOG_COL_TIME).value = "时间戳"
-        .Cells(1, RUNLOG_COL_USER).value = "用户名"
-        .Cells(1, RUNLOG_COL_MODULE).value = "功能模块"
-        .Cells(1, RUNLOG_COL_OP).value = "操作"
-        .Cells(1, RUNLOG_COL_OBJ).value = "记录ID/对象"
-        .Cells(1, RUNLOG_COL_BEFORE).value = "操作前值"
-        .Cells(1, RUNLOG_COL_AFTER).value = "操作后值"
-        .Cells(1, RUNLOG_COL_RESULT).value = "结果"
-        .Cells(1, RUNLOG_COL_DETAIL).value = "详细信息"
-        .Cells(1, RUNLOG_COL_ELAPSED).value = "耗时(秒)"
-        .Cells(1, RUNLOG_COL_PC).value = "电脑名"
+        .Cells(1, RUNLOG_COL_SEQ).Value = "序号"
+        .Cells(1, RUNLOG_COL_TIME).Value = "时间"
+        .Cells(1, RUNLOG_COL_USER).Value = "用户名"
+        .Cells(1, RUNLOG_COL_MODULE).Value = "模块"
+        .Cells(1, RUNLOG_COL_OP).Value = "动作"
+        .Cells(1, RUNLOG_COL_OBJ).Value = "对象ID/路径"
+        .Cells(1, RUNLOG_COL_BEFORE).Value = "前值"
+        .Cells(1, RUNLOG_COL_AFTER).Value = "后值"
+        .Cells(1, RUNLOG_COL_RESULT).Value = "结果"
+        .Cells(1, RUNLOG_COL_DETAIL).Value = "详情"
+        .Cells(1, RUNLOG_COL_ELAPSED).Value = "耗时(秒)"
+        .Cells(1, RUNLOG_COL_PC).Value = "电脑名"
         .Range(.Cells(1, 1), .Cells(1, RUNLOG_COL_PC)).Font.Bold = True
         .Range(.Cells(1, 1), .Cells(1, RUNLOG_COL_PC)).Interior.Color = RGB(220, 230, 241)
     End With
 End Sub
 
-' 写入一行运行日志（12列；每条操作一行；用户名/电脑名留空不调 Environ 防闪退；不激活表不选行）。
-Public Sub RunLog_WriteRow(ByVal 功能模块 As String, ByVal 操作 As String, ByVal 记录ID对象 As String, _
-    ByVal 操作前值 As String, ByVal 操作后值 As String, ByVal 结果 As String, ByVal 详细信息 As String, ByVal 耗时秒 As String)
+Public Sub RunLog_WriteRow(ByVal moduleName As String, ByVal operation As String, ByVal objectId As String, _
+    ByVal beforeValue As String, ByVal afterValue As String, ByVal resultText As String, ByVal detailText As String, ByVal elapsedText As String)
     If Not ENABLE_RUNLOG Then Exit Sub
     Dim ws As Worksheet
     Dim nextRow As Long
-    Dim 序号 As Long
+    Dim seq As Long
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(RUNLOG_SHEET_NAME)
     If ws Is Nothing Then EnsureRunLogSheet: Set ws = ThisWorkbook.Worksheets(RUNLOG_SHEET_NAME)
     If ws Is Nothing Then Exit Sub
     nextRow = ws.Cells(ws.Rows.count, RUNLOG_COL_SEQ).End(xlUp).row + 1
     If nextRow < 2 Then Exit Sub
-    序号 = nextRow - 1
-    ws.Cells(nextRow, RUNLOG_COL_SEQ).value = 序号
-    ws.Cells(nextRow, RUNLOG_COL_TIME).value = Format(Now, "yyyy/mm/dd hh:nn:ss")
-    ws.Cells(nextRow, RUNLOG_COL_USER).value = ""
-    ws.Cells(nextRow, RUNLOG_COL_MODULE).value = 功能模块
-    ws.Cells(nextRow, RUNLOG_COL_OP).value = 操作
-    ws.Cells(nextRow, RUNLOG_COL_OBJ).value = 记录ID对象
-    ws.Cells(nextRow, RUNLOG_COL_BEFORE).value = 操作前值
-    ws.Cells(nextRow, RUNLOG_COL_AFTER).value = 操作后值
-    ws.Cells(nextRow, RUNLOG_COL_RESULT).value = 结果
-    ws.Cells(nextRow, RUNLOG_COL_DETAIL).value = 详细信息
-    ws.Cells(nextRow, RUNLOG_COL_ELAPSED).value = 耗时秒
-    ws.Cells(nextRow, RUNLOG_COL_PC).value = ""
+    seq = nextRow - 1
+    ws.Cells(nextRow, RUNLOG_COL_SEQ).Value = seq
+    ws.Cells(nextRow, RUNLOG_COL_TIME).Value = Format(Now, "yyyy/mm/dd hh:nn:ss")
+    ws.Cells(nextRow, RUNLOG_COL_USER).Value = ""
+    ws.Cells(nextRow, RUNLOG_COL_MODULE).Value = moduleName
+    ws.Cells(nextRow, RUNLOG_COL_OP).Value = operation
+    ws.Cells(nextRow, RUNLOG_COL_OBJ).Value = objectId
+    ws.Cells(nextRow, RUNLOG_COL_BEFORE).Value = beforeValue
+    ws.Cells(nextRow, RUNLOG_COL_AFTER).Value = afterValue
+    ws.Cells(nextRow, RUNLOG_COL_RESULT).Value = resultText
+    ws.Cells(nextRow, RUNLOG_COL_DETAIL).Value = detailText
+    ws.Cells(nextRow, RUNLOG_COL_ELAPSED).Value = elapsedText
+    ws.Cells(nextRow, RUNLOG_COL_PC).Value = ""
 End Sub
 
-' 兼容旧调用：追加一行，操作与详细信息填入对应列。
 Public Sub RunLog_Append(ByVal operation As String, Optional ByVal detail As String = "")
     If Not ENABLE_RUNLOG Then Exit Sub
     RunLog_WriteRow "", operation, "", "", "", "", detail, ""
@@ -350,11 +348,11 @@ Private Sub ImportOneFile(ByVal vbProj As VBIDE.VBProject, ByVal f As Object, By
             vbProj.VBComponents.Import f.path
     End Select
 
-    RunLog_WriteRow "vba导入", "导入", f.Name, "", "", "成功", "OK", ""
+    RunLog_WriteRow "vba", "", f.Name, "", "", "", "OK", ""
     Exit Sub
 
 ImportErr:
-    RunLog_WriteRow "vba导入", "导入", f.Name, "", "", "失败", Err.Number & " " & Err.Description, ""
+    RunLog_WriteRow "vba", "", f.Name, "", "", "", Err.Number & " " & Err.Description, ""
 End Sub
 
 Private Function FindComponent(ByVal vbProj As VBIDE.VBProject, ByVal compName As String) As VBIDE.VBComponent
@@ -477,7 +475,7 @@ Private Sub ExportStdModule(ByVal vbComp As VBIDE.VBComponent, ByVal targetPath 
     vbComp.Export targetPath
     exportName = FileBaseName(Mid(targetPath, InStrRev(targetPath, "\") + 1))
     content = ReadTextFile(targetPath, charset)
-    ' 统一保留 Attribute VB_Name，导入时模块名不会变成「模块1」
+    '  Attribute VB_Nameɡ1
     fixedContent = ReplaceFirstAttributeVBName(content, exportName)
     WriteTextFile targetPath, fixedContent, charset
 End Sub
@@ -628,7 +626,6 @@ Public Sub Sync_ImportAll()
     ' One-click import (skip vbaSync module)
     Call ImportVBAModules("", "GBK", "vbaSync")
 End Sub
-
 
 
 

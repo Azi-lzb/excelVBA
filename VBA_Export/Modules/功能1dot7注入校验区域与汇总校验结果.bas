@@ -340,6 +340,8 @@ Public Sub 注入校验区域()
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
     On Error GoTo ErrInject
 
     Set tmplWb = Workbooks.Open(tmplPath, ReadOnly:=True, UpdateLinks:=0)
@@ -402,6 +404,8 @@ NextFile:
 
     tmplWb.Close SaveChanges:=False
     Set tmplWb = Nothing
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
 
@@ -410,6 +414,8 @@ NextFile:
     Exit Sub
 
 ErrInject:
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     On Error Resume Next
@@ -489,7 +495,21 @@ Public Sub 汇总校验结果()
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
     On Error GoTo ErrSum
+
+    ' [优化F] 预分配结果数组，避免逐格写入工作表
+    Const MAX_RESULT As Long = 50000
+    Dim resArr() As Variant
+    ReDim resArr(1 To MAX_RESULT, 1 To 13)
+    Dim arrIdx As Long
+    arrIdx = 0
+
+    ' [优化G] 按模板表名缓存批注字典，避免重复提取
+    Dim atcCache As Object
+    Set atcCache = CreateObject("Scripting.Dictionary")
+    atcCache.CompareMode = vbTextCompare
 
     Set tmplWb = Workbooks.Open(tmplPath, ReadOnly:=True, UpdateLinks:=0)
 
@@ -512,7 +532,13 @@ Public Sub 汇总校验结果()
             On Error GoTo 0
             If tmplWs Is Nothing Then GoTo NextSheet2
 
-            ExtractComments tmplWs, atc
+            ' [优化G] 使用缓存，同一模板表不重复提取批注
+            If Not atcCache.Exists(tmplWs.Name) Then
+                ExtractComments tmplWs, atc
+                Set atcCache(tmplWs.Name) = atc
+            Else
+                Set atc = atcCache(tmplWs.Name)
+            End If
             Set regsLocal = ExtractRegions(atc, TMPL_KEY_LOCAL)
             Set regsCross = ExtractRegions(atc, TMPL_KEY_CROSS)
             Set regs = MergeRegions(regsLocal, regsCross)
@@ -526,20 +552,23 @@ Public Sub 汇总校验结果()
                         If ContainsAnyKey(cellVal) Then
                             ParsePipe5 cellVal, errType, r1, r2, r3, r4
                             cmTxt = CellCommentText(srcWs.Cells(r, c))
-                            wsRes.Cells(outRow, rcTmplWb).Value = tmplWb.Name
-                            wsRes.Cells(outRow, rcTmplWs).Value = tmplWs.Name
-                            wsRes.Cells(outRow, rcSrcWb).Value = srcWb.Name
-                            wsRes.Cells(outRow, rcSrcWs).Value = srcWs.Name
-                            wsRes.Cells(outRow, rcRow).Value = r
-                            wsRes.Cells(outRow, rcCol).Value = c
-                            wsRes.Cells(outRow, rcRowName).Value = rowName
-                            wsRes.Cells(outRow, rcErrType).Value = errType
-                            wsRes.Cells(outRow, rcRsv1).Value = r1
-                            wsRes.Cells(outRow, rcRsv2).Value = r2
-                            wsRes.Cells(outRow, rcRsv3).Value = r3
-                            wsRes.Cells(outRow, rcRsv4).Value = r4
-                            wsRes.Cells(outRow, rcComment).Value = cmTxt
-                            outRow = outRow + 1
+                            ' [优化F] 写入数组而非逐格写工作表
+                            arrIdx = arrIdx + 1
+                            If arrIdx <= MAX_RESULT Then
+                                resArr(arrIdx, rcTmplWb) = tmplWb.Name
+                                resArr(arrIdx, rcTmplWs) = tmplWs.Name
+                                resArr(arrIdx, rcSrcWb) = srcWb.Name
+                                resArr(arrIdx, rcSrcWs) = srcWs.Name
+                                resArr(arrIdx, rcRow) = r
+                                resArr(arrIdx, rcCol) = c
+                                resArr(arrIdx, rcRowName) = rowName
+                                resArr(arrIdx, rcErrType) = errType
+                                resArr(arrIdx, rcRsv1) = r1
+                                resArr(arrIdx, rcRsv2) = r2
+                                resArr(arrIdx, rcRsv3) = r3
+                                resArr(arrIdx, rcRsv4) = r4
+                                resArr(arrIdx, rcComment) = cmTxt
+                            End If
                             hitCnt = hitCnt + 1
                         End If
                     Next c
@@ -556,7 +585,15 @@ NextFile2:
 
     tmplWb.Close SaveChanges:=False
     Set tmplWb = Nothing
+    ' [优化F] 一次性写入结果数组
+    If arrIdx > 0 Then
+        Dim writeCount As Long
+        writeCount = IIf(arrIdx > MAX_RESULT, MAX_RESULT, arrIdx)
+        wsRes.Cells(2, 1).Resize(writeCount, 13).Value = resArr
+    End If
     wsRes.Columns.AutoFit
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
 
@@ -565,6 +602,8 @@ NextFile2:
     Exit Sub
 
 ErrSum:
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     On Error Resume Next
@@ -622,6 +661,8 @@ Public Sub 清空校验区域()
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
     On Error GoTo ErrClear
 
     For fi = 1 To srcPaths.Count
@@ -648,16 +689,24 @@ Public Sub 清空校验区域()
             Next iKey
             If regs.Count = 0 Then GoTo NextSheetClear
 
+            ' [优化H] 先 Union 所有区域，再一次 ClearContents + ClearComments
+            Dim clearRng As Range
+            Dim rgBlock As Range
             For Each rg In regs
-                For r = CLng(rg(0)) To CLng(rg(1))
-                    For c = CLng(rg(2)) To CLng(rg(3))
-                        srcWs.Cells(r, c).ClearContents
-                        On Error Resume Next
-                        If Not srcWs.Cells(r, c).Comment Is Nothing Then srcWs.Cells(r, c).Comment.Delete
-                        On Error GoTo 0
-                    Next c
-                Next r
+                Set rgBlock = srcWs.Range(srcWs.Cells(CLng(rg(0)), CLng(rg(2))), srcWs.Cells(CLng(rg(1)), CLng(rg(3))))
+                If clearRng Is Nothing Then
+                    Set clearRng = rgBlock
+                Else
+                    Set clearRng = Union(clearRng, rgBlock)
+                End If
             Next rg
+            If Not clearRng Is Nothing Then
+                clearRng.ClearContents
+                On Error Resume Next
+                clearRng.ClearComments
+                On Error GoTo 0
+                Set clearRng = Nothing
+            End If
 NextSheetClear:
         Next srcWs
 
@@ -668,6 +717,8 @@ NextFileClear:
         Set srcWb = Nothing
     Next fi
 
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     RunLog_WriteRow logKey, "完成", "", "", "", "", "完成", CStr(Round(Timer - t0, 2))
@@ -675,6 +726,8 @@ NextFileClear:
     Exit Sub
 
 ErrClear:
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     On Error Resume Next
