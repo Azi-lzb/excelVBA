@@ -23,6 +23,7 @@ Desktop.ini
 *.xlsm
 *.xlsb
 *.csv
+!*[Vv][Bb][Aa]*.xlsm
 
 # Archives (usually sample attachments)
 *.zip
