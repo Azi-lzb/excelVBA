@@ -1,9 +1,9 @@
-# 通用汇总工具（VBA + Python）
+# 通用汇总工具（VBA）
 
 本项目用于金融报表场景的批量处理，核心目标是：
 - 用配置表驱动批处理，减少手工操作。
 - 统一“时序提取 / 宽表汇总 / 打印输出 / 去重追加”口径。
-- 同时提供 VBA（Excel 内）与 Python（外部批跑）两套实现。
+- 以 VBA（Excel 内）实现为主，面向日常批量报表处理。
 
 ---
 
@@ -13,7 +13,7 @@
 - `VBA_Export/Modules/`：VBA 模块源码（`.bas`）。
 - `VBA_Export/Documents/ThisWorkbook.cls`：菜单与入口绑定。
 - `VBA_Export/InitData/`：初始化配置模板（`.tsv`）。
-- `pytools/`：Python 版工具（终端菜单、批处理、COM/非COM双引擎）。
+- `pytools/`：历史目录（Python 版已独立迁移到单独项目，不在本仓库维护）。
 - `使用说明.md`：详细功能说明（逐菜单口径）。
 
 ---
@@ -54,19 +54,9 @@
 
 ---
 
-## 4. Python 版（pytools）
+## 4. 关于 Python 版
 
-`pytools` 提供同类批处理能力，适合大批量/低交互场景：
-- 支持非 COM 与 COM 引擎。
-- 支持自动路由（如 `.xls` 走 COM，其它走非 COM）。
-- 终端菜单执行，配置文件统一走 `config/config.xlsx`。
-
-运行示例（源码方式）：
-
-```powershell
-cd pytools
-python main.py
-```
+Python 版工具已迁移到独立仓库维护。本仓库 README 与使用说明仅覆盖 VBA 工具箱能力。
 
 ---
 
@@ -90,4 +80,3 @@ python main.py
 ## 7. 文档
 
 - 详细功能说明：[`使用说明.md`](./使用说明.md)
-
