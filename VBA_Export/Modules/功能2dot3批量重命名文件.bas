@@ -84,6 +84,9 @@ Public Sub 批量重命名文件()
                     If StrComp(filePath, newFilePath, vbTextCompare) = 0 Then
                         RunLog_WriteRow "2.3 批量重命名文件", "跳过", fileName, newFileName, "", "名称已为目标", "", ""
                         countSkip = countSkip + 1
+                    ElseIf ContainsInvalidFileNameChars(newFileName) Then
+                        RunLog_WriteRow "2.3 批量重命名文件", "跳过", fileName, newFileName, "", "目标文件名含非法字符，已跳过", "", ""
+                        countSkip = countSkip + 1
                     ElseIf Dir(newFilePath) <> "" Then
                         RunLog_WriteRow "2.3 批量重命名文件", "跳过", fileName, newFileName, "", "目标文件已存在", "", ""
                         countSkip = countSkip + 1
@@ -146,4 +149,17 @@ End Function
 Private Function 取键值(ByVal d As Object, ByVal key As String) As String
     If d Is Nothing Then Exit Function
     If d.Exists(key) Then 取键值 = CStr(d(key))
+End Function
+
+Private Function ContainsInvalidFileNameChars(ByVal fileNameOnly As String) As Boolean
+    Dim invalidChars As Variant
+    Dim ch As Variant
+
+    invalidChars = Array("\", "/", ":", "*", "?", """", "<", ">", "|")
+    For Each ch In invalidChars
+        If InStr(1, fileNameOnly, CStr(ch), vbBinaryCompare) > 0 Then
+            ContainsInvalidFileNameChars = True
+            Exit Function
+        End If
+    Next ch
 End Function

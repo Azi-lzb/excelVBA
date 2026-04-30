@@ -184,6 +184,8 @@ Private Sub BuildReportMenu()
 
     AddButton popupMenu, "6.11 初始化打印配置", "初始化打印配置"
 
+    AddButton popupMenu, "6.12 初始化时序提取规则", "初始化时序提取规则"
+
 
 
     Set popupMenu = Nothing
@@ -281,6 +283,7 @@ Private Sub AddDimensionPopup(ByVal parentMenu As Object)
     AddButton dimensionMenu, "3.9.6 提取时序（快速精简）", "ExecuteTimelineExtractionFastSlim"
 
     AddButton dimensionMenu, "3.9.7 规则汇总（宽表）", "ExecuteRuleWideSummary"
+    AddButton dimensionMenu, "3.9.7.1 规则汇总（宽表，行头不加后缀）", "ExecuteRuleWideSummary_NoRowSuffix"
 
     AddButton dimensionMenu, "3.9.8 配置预校验", "Execute3dot9Precheck"
 

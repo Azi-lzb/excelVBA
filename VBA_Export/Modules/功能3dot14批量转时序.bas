@@ -125,6 +125,7 @@ Private Const TIMELINE_FAST_FLUSH_SIZE As Long = 1000
 Private Const PRECHECK_LOG_KEY As String = "3.9.8 配置预校验"
 
 Private Const WIDE_DYNAMIC_COL_WIDTH As Double = 14#
+Private Const WIDE_DEDUP_SEP As String = "|#|"
 
 
 
@@ -213,6 +214,9 @@ Private gValidationMapWarn As Long
 Private gPrecheckRunning As Boolean
 
 Private gWideVerboseLogEnabled As Boolean
+Private gWideUniqueSuffixEnabled As Boolean
+Private gWideHeaderDecisionSet As Boolean
+Private gWideHeaderWriteTarget As Boolean
 
 
 
@@ -334,7 +338,9 @@ Private Enum RuleCols
 
 
 
-    rcRemark = 14
+    rcTargetWorkbook = 14
+    rcTargetSheet = 15
+    rcTargetWriteEnabled = 16
 
 
 
@@ -799,14 +805,9 @@ Public Sub 初始化时序提取配置()
 
 
     Set wsRule = EnsureRuleSheet()
-
-
-
-
-
-
-
-    InitRuleHeader wsRule
+    If Trim$(CStr(wsRule.Cells(1, rcEnabled).Value)) = "" Then
+        EnsureRuleHeaderIfNeeded wsRule
+    End If
 
 
 
@@ -940,6 +941,22 @@ Public Sub Execute3dot9Precheck()
 
 End Sub
 
+Public Sub Execute3dot9CompareByPosition()
+    执行表头位置比对
+End Sub
+
+Public Sub Execute3dot9CompareByPath()
+    执行表头路径集合比对
+End Sub
+
+Public Sub Execute3dot9CompareHybrid()
+    执行表头混合比对
+End Sub
+
+Public Sub ExecuteTimelineExtractionFull()
+    批量转时序数据
+End Sub
+
 
 
 
@@ -1066,7 +1083,9 @@ Private Sub Run3dot9Precheck(ByVal writeLog As Boolean, ByRef summaryText As Str
 
 
 
-    InitRuleHeader wsRule
+    If Trim$(CStr(wsRule.Cells(1, rcEnabled).Value)) = "" Then
+        EnsureRuleHeaderIfNeeded wsRule
+    End If
 
 
 
@@ -1154,7 +1173,9 @@ Private Sub Run3dot9Precheck(ByVal writeLog As Boolean, ByRef summaryText As Str
 
 
 
-    InitPathMapHeader wsMap
+    If Trim$(CStr(wsMap.Cells(1, 1).Value)) = "" Then
+        InitPathMapHeader wsMap
+    End If
 
 
 
@@ -1308,6 +1329,10 @@ Private Function Build3dot9PrecheckSummaryText() As String
 
 End Function
 
+Private Function BuildFallbackColPath(ByVal colNo As Long) As String
+    BuildFallbackColPath = "列_" & ColumnNumberToLetter(colNo)
+End Function
+
 
 
 
@@ -1326,7 +1351,7 @@ Private Function IsRuleRowMeaningful(ByVal wsRule As Worksheet, ByVal rowNo As L
 
 
 
-    For colNo = rcEnabled To rcRemark
+    For colNo = rcEnabled To rcTargetWriteEnabled
 
 
 
@@ -1475,18 +1500,6 @@ Private Function ValidateOneRuleRow(ByVal wsRule As Worksheet, ByVal rowNo As Lo
 
 
     Set rowHeaderCols = ParseColumnCollection(CStr(wsRule.Cells(rowNo, rcRowHeaderCols).Value), invalidCount)
-
-
-
-    If rowHeaderCols.Count = 0 Then
-
-
-
-        errMsg = AppendErrText(errMsg, "行头列为空或格式非法")
-
-
-
-    End If
 
 
 
@@ -2135,6 +2148,9 @@ Public Sub 执行表头路径比对()
 
 
     Dim errDesc As String
+    Dim sourceSheetMatchCache As Object
+    Dim templateSheetMatchCache As Object
+    Dim pathMapCache As Object
 
 
 
@@ -2182,7 +2198,7 @@ Public Sub 执行表头路径比对()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -2234,20 +2250,6 @@ Public Sub 执行表头路径比对()
 
 
     End If
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
 
@@ -2426,6 +2428,12 @@ Public Sub 执行表头路径比对()
 
 
     For Each fileItem In fd.SelectedItems
+        Set sourceSheetMatchCache = CreateObject("Scripting.Dictionary")
+        sourceSheetMatchCache.CompareMode = vbTextCompare
+        Set templateSheetMatchCache = CreateObject("Scripting.Dictionary")
+        templateSheetMatchCache.CompareMode = vbTextCompare
+        Set pathMapCache = CreateObject("Scripting.Dictionary")
+        pathMapCache.CompareMode = vbTextCompare
 
 
 
@@ -2921,7 +2929,7 @@ Public Sub 执行表头路径集合比对()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -3228,7 +3236,7 @@ Public Sub 执行表头路径集合比对()
 
 
 
-                CompareOneRuleByPath wsRule, ruleRow, templateWb, sourceWb, compareWs, resultRow, hitSheets, diffRows, sameRows, skipRules
+                CompareOneRuleByPath wsRule, ruleRow, templateWb, sourceWb, compareWs, resultRow, hitSheets, diffRows, sameRows, skipRules, sourceSheetMatchCache, templateSheetMatchCache, pathMapCache
 
 
 
@@ -3676,7 +3684,7 @@ Public Sub 执行表头混合比对()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -3927,7 +3935,12 @@ Public Sub 执行表头混合比对()
 
 
 
-        Set sourceWb = Workbooks.Open(CStr(fileItem), ReadOnly:=True, UpdateLinks:=0)
+            If StrComp(CStr(fileItem), templatePath, vbTextCompare) = 0 Then
+        skipBooks = skipBooks + 1
+        RunLog_WriteRow HYBRID_COMPARE_LOG_KEY, "跳过", CStr(fileItem), "", "", "跳过", "与模板同一文件", ""
+        GoTo NextHybridSource
+    End If
+    Set sourceWb = Workbooks.Open(CStr(fileItem), ReadOnly:=True, UpdateLinks:=0)
 
 
 
@@ -4016,6 +4029,7 @@ Public Sub 执行表头混合比对()
 
 
         SafeCloseWorkbook sourceWb
+NextHybridSource:
 
 
 
@@ -4419,7 +4433,7 @@ Public Sub 批量转时序数据()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -5278,7 +5292,7 @@ Public Sub ExecuteTimelineExtractionFast()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -6425,7 +6439,7 @@ Public Sub ExecuteTimelineExtractionFastSlim()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -7325,6 +7339,14 @@ End Sub
 
 
 Public Sub ExecuteRuleWideSummary()
+    ExecuteRuleWideSummaryCore True
+End Sub
+
+Public Sub ExecuteRuleWideSummary_NoRowSuffix()
+    ExecuteRuleWideSummaryCore False
+End Sub
+
+Private Sub ExecuteRuleWideSummaryCore(ByVal addRowUniqueSuffix As Boolean)
 
 
 
@@ -7541,6 +7563,18 @@ Public Sub ExecuteRuleWideSummary()
 
 
     Dim resultSheetNameMap As Object
+    Dim resultSheetCount As Long
+    Dim fallbackGroups As Long
+    Dim targetWriteGroups As Long
+    Dim targetSkipGroups As Long
+    Dim targetAppendRows As Long
+    Dim targetCache As Object
+    Dim targetOpenedByCode As Object
+    Dim targetModified As Object
+    Dim appendRowsOneGroup As Long
+    Dim appendDetail As String
+    Dim writeToFallback As Boolean
+
 
 
 
@@ -7565,6 +7599,9 @@ Public Sub ExecuteRuleWideSummary()
 
 
     RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "开始", "", "", "", "", "开始", ""
+    gWideUniqueSuffixEnabled = addRowUniqueSuffix
+    gWideHeaderDecisionSet = False
+    gWideHeaderWriteTarget = False
 
 
 
@@ -7588,7 +7625,7 @@ Public Sub ExecuteRuleWideSummary()
 
 
 
-    InitRuleHeader wsRule
+    EnsureRuleHeaderIfNeeded wsRule
 
 
 
@@ -7790,6 +7827,9 @@ Public Sub ExecuteRuleWideSummary()
 
 
     Set groupOrder = New Collection
+    Set targetCache = CreateObject("Scripting.Dictionary")
+    Set targetOpenedByCode = CreateObject("Scripting.Dictionary")
+    Set targetModified = CreateObject("Scripting.Dictionary")
 
     gWideVerboseLogEnabled = IsWideVerboseLogEnabled()
 
@@ -7941,7 +7981,7 @@ Public Sub ExecuteRuleWideSummary()
 
 
 
-                ProcessOneWideSummaryRule wsRule, ruleRow, targetWb, dataDateText, pathMappings, groupStore, groupOrder, hitSheets, skipRules, outputRows, conflictRows
+                ProcessOneWideSummaryRule wsRule, ruleRow, targetWb, dataDateText, pathMappings, groupStore, groupOrder, gWideUniqueSuffixEnabled, hitSheets, skipRules, outputRows, conflictRows
 
 
 
@@ -8005,7 +8045,7 @@ NextWideBook:
 
 
 
-    Set resultWb = CreateResultWorkbook(WIDE_RESULT_SHEET_NAME, wsResult)
+    Set resultWb = Nothing
 
 
 
@@ -8013,7 +8053,7 @@ NextWideBook:
 
 
 
-    Set resultSheetNameMap = CreateObject("Scripting.Dictionary")
+    Set resultSheetNameMap = Nothing
 
 
 
@@ -8021,7 +8061,7 @@ NextWideBook:
 
 
 
-    resultSheetNameMap.CompareMode = vbTextCompare
+    resultSheetCount = 0
 
 
 
@@ -8077,7 +8117,8 @@ NextWideBook:
 
 
 
-        If StrComp(CStr(oneGroupKey), CStr(groupOrder(1)), vbTextCompare) = 0 Then
+        writeToFallback = False
+        If CBool(groupItem("hasTarget")) Then
 
 
 
@@ -8085,7 +8126,28 @@ NextWideBook:
 
 
 
-            Set wsResult = resultWb.Worksheets(1)
+            appendRowsOneGroup = 0
+            appendDetail = ""
+            If AppendWideSummaryGroupToTarget(groupItem, targetCache, targetOpenedByCode, targetModified, appendRowsOneGroup, appendDetail) Then
+                targetWriteGroups = targetWriteGroups + 1
+                targetAppendRows = targetAppendRows + appendRowsOneGroup
+                RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "写入目标", CStr(groupItem("displayRuleName")), CStr(groupItem("targetWorkbookPath")), CStr(groupItem("targetSheetName")), "完成", "新增行=" & appendRowsOneGroup & IIf(Len(Trim$(appendDetail)) > 0, "；" & appendDetail, ""), ""
+            Else
+                targetSkipGroups = targetSkipGroups + 1
+                writeToFallback = True
+                fallbackGroups = fallbackGroups + 1
+                If resultWb Is Nothing Then
+                    Set resultWb = CreateResultWorkbook(WIDE_RESULT_SHEET_NAME, wsResult)
+                    Set resultSheetNameMap = CreateObject("Scripting.Dictionary")
+                    resultSheetNameMap.CompareMode = vbTextCompare
+                End If
+                If resultSheetCount = 0 Then
+                    Set wsResult = resultWb.Worksheets(1)
+                Else
+                    Set wsResult = resultWb.Worksheets.Add(After:=resultWb.Worksheets(resultWb.Worksheets.Count))
+                End If
+                RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "目标失败回退", CStr(groupItem("displayRuleName")), CStr(groupItem("targetWorkbookPath")), CStr(groupItem("targetSheetName")), "回退", appendDetail, ""
+            End If
 
 
 
@@ -8101,7 +8163,18 @@ NextWideBook:
 
 
 
-            Set wsResult = resultWb.Worksheets.Add(After:=resultWb.Worksheets(resultWb.Worksheets.Count))
+            fallbackGroups = fallbackGroups + 1
+            writeToFallback = True
+            If resultWb Is Nothing Then
+                Set resultWb = CreateResultWorkbook(WIDE_RESULT_SHEET_NAME, wsResult)
+                Set resultSheetNameMap = CreateObject("Scripting.Dictionary")
+                resultSheetNameMap.CompareMode = vbTextCompare
+            End If
+            If resultSheetCount = 0 Then
+                Set wsResult = resultWb.Worksheets(1)
+            Else
+                Set wsResult = resultWb.Worksheets.Add(After:=resultWb.Worksheets(resultWb.Worksheets.Count))
+            End If
 
 
 
@@ -8117,7 +8190,8 @@ NextWideBook:
 
 
 
-        wsResult.Cells.Clear
+        If writeToFallback Then
+            wsResult.Cells.Clear
 
 
 
@@ -8125,7 +8199,7 @@ NextWideBook:
 
 
 
-        wsResult.Name = BuildWideSummarySheetName(CStr(oneGroupKey), resultSheetNameMap)
+            wsResult.Name = BuildWideSummarySheetName(CStr(groupItem("displayRuleName")), resultSheetNameMap)
 
 
 
@@ -8133,9 +8207,11 @@ NextWideBook:
 
 
 
-        WriteWideSummarySheet wsResult, groupItem("rowStore"), groupItem("rowOrder"), groupItem("colOrder")
+            WriteWideSummarySheet wsResult, groupItem("rowStore"), groupItem("rowOrder"), groupItem("colOrder"), CBool(groupItem("outputRowPath"))
 
-        ApplyWideSummarySheetLayout wsResult, CLng(groupItem("colOrder").Count)
+            ApplyWideSummarySheetLayout wsResult, CLng(groupItem("colOrder").Count), CBool(groupItem("outputRowPath"))
+            resultSheetCount = resultSheetCount + 1
+        End If
 
 
 
@@ -8166,6 +8242,8 @@ NextWideGroup:
 
 
     Next oneGroupKey
+
+    SaveAndCloseWideSummaryTargetWorkbooks targetCache, targetOpenedByCode, targetModified
 
 
 
@@ -8205,7 +8283,7 @@ NextWideGroup:
 
 
 
-    RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "结果", CStr(hitBooks), CStr(hitSheets), CStr(outputRows), "完成", "结果Sheet数=" & groupOrder.Count & " 宽表总行数=" & totalWideRows & " 动态列总数=" & totalDynamicCols & " 跳过规则=" & skipRules & " 跳过工作簿=" & skipBooks & " 冲突数=" & conflictRows, CStr(Round(Timer - t0, 2))
+    RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "结果", CStr(hitBooks), CStr(hitSheets), CStr(outputRows), "完成", "结果Sheet数=" & resultSheetCount & " 宽表总行数=" & totalWideRows & " 动态列总数=" & totalDynamicCols & " 目标写入组=" & targetWriteGroups & " 目标跳过组=" & targetSkipGroups & " 目标新增行=" & targetAppendRows & " 跳过规则=" & skipRules & " 跳过工作簿=" & skipBooks & " 冲突数=" & conflictRows, CStr(Round(Timer - t0, 2))
 
 
 
@@ -8213,7 +8291,7 @@ NextWideGroup:
 
 
 
-    MsgBox BuildWideSummaryMessage(hitBooks, hitSheets, totalWideRows, totalDynamicCols, skipRules, skipBooks, conflictRows, CLng(groupOrder.Count)), vbInformation, "规则汇总（宽表）"
+    MsgBox BuildWideSummaryMessage(hitBooks, hitSheets, totalWideRows, totalDynamicCols, skipRules, skipBooks, conflictRows, resultSheetCount, targetWriteGroups, targetSkipGroups, targetAppendRows), vbInformation, "规则汇总（宽表）"
 
 
 
@@ -8277,6 +8355,7 @@ WideSummaryErrHandler:
 
 
 
+    CloseWideSummaryTargetWorkbooks targetCache, targetOpenedByCode
     SafeCloseWorkbook targetWb
 
 
@@ -8317,7 +8396,7 @@ End Sub
 
 
 
-Private Sub ProcessOneWideSummaryRule(ByVal wsRule As Worksheet, ByVal ruleRow As Long, ByVal targetWb As Workbook, ByVal dataDateText As String, ByVal pathMappings As Collection, ByVal groupStore As Object, ByVal groupOrder As Collection, ByRef hitSheets As Long, ByRef skipRules As Long, ByRef outputRows As Long, ByRef conflictRows As Long)
+Private Sub ProcessOneWideSummaryRule(ByVal wsRule As Worksheet, ByVal ruleRow As Long, ByVal targetWb As Workbook, ByVal dataDateText As String, ByVal pathMappings As Collection, ByVal groupStore As Object, ByVal groupOrder As Collection, ByVal addUniqueSuffix As Boolean, ByRef hitSheets As Long, ByRef skipRules As Long, ByRef outputRows As Long, ByRef conflictRows As Long)
 
 
 
@@ -8414,6 +8493,10 @@ Private Sub ProcessOneWideSummaryRule(ByVal wsRule As Worksheet, ByVal ruleRow A
 
 
     Dim skipKeywords As String
+    Dim targetWorkbookPath As String
+    Dim targetSheetName As String
+    Dim targetWriteEnabled As Boolean
+    Dim groupKey As String
 
 
 
@@ -8542,6 +8625,14 @@ Private Sub ProcessOneWideSummaryRule(ByVal wsRule As Worksheet, ByVal ruleRow A
 
 
     skipKeywords = Trim$(CStr(wsRule.Cells(ruleRow, rcSkipKeywords).Value))
+    targetWorkbookPath = GetRuleTextByHeaderOrIndex(wsRule, ruleRow, rcTargetWorkbook, "目标工作簿路径", "目标工作簿", "目标簿")
+    targetSheetName = GetRuleTextByHeaderOrIndex(wsRule, ruleRow, rcTargetSheet, "目标工作表", "目标Sheet", "目标表")
+    targetWriteEnabled = ParseWideSummaryTargetWriteEnabled(GetRuleTextByHeaderOrIndex(wsRule, ruleRow, rcTargetWriteEnabled, "启用目标写入", "目标写入启用", "启用写入"), True)
+    If Not targetWriteEnabled Then
+        If Len(Trim$(targetWorkbookPath)) > 0 Or Len(Trim$(targetSheetName)) > 0 Then
+            RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "目标写入禁用", targetWb.Name & "|" & ruleName, targetWorkbookPath, targetSheetName, "跳过", "本规则启用目标写入=否，仅输出到结果工作簿", ""
+        End If
+    End If
 
 
 
@@ -8757,7 +8848,8 @@ Private Sub ProcessOneWideSummaryRule(ByVal wsRule As Worksheet, ByVal ruleRow A
 
 
 
-    Set groupItem = EnsureWideSummaryGroup(groupStore, groupOrder, ruleName)
+    groupKey = BuildWideSummaryGroupKey(ruleName, targetWorkbookPath, targetSheetName, targetWriteEnabled)
+    Set groupItem = EnsureWideSummaryGroup(groupStore, groupOrder, groupKey, ruleName, targetWorkbookPath, targetSheetName, targetWriteEnabled, (rowHeaderCols.Count > 0))
 
 
 
@@ -8781,7 +8873,7 @@ Private Sub ProcessOneWideSummaryRule(ByVal wsRule As Worksheet, ByVal ruleRow A
 
 
 
-        ExtractSheetToWideSummary item, targetWb.Name, dataDateText, ruleName, rowHeaderCols, colHeaderRows, requiredColPaths, requiredRowPaths, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, pathMappings, groupItem("rowStore"), groupItem("rowOrder"), groupItem("colIndexMap"), groupItem("colOrder"), hitSheets, skipRules, outputRows, conflictRows
+        ExtractSheetToWideSummary item, targetWb.Name, dataDateText, ruleName, rowHeaderCols, colHeaderRows, requiredColPaths, requiredRowPaths, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, pathMappings, groupItem("rowStore"), groupItem("rowOrder"), groupItem("colIndexMap"), groupItem("colOrder"), addUniqueSuffix, hitSheets, skipRules, outputRows, conflictRows
 
 
 
@@ -8813,7 +8905,7 @@ End Sub
 
 
 
-Private Function EnsureWideSummaryGroup(ByVal groupStore As Object, ByVal groupOrder As Collection, ByVal ruleName As String) As Object
+Private Function EnsureWideSummaryGroup(ByVal groupStore As Object, ByVal groupOrder As Collection, ByVal groupKey As String, ByVal ruleName As String, ByVal targetWorkbookPath As String, ByVal targetSheetName As String, ByVal targetWriteEnabled As Boolean, ByVal outputRowPath As Boolean) As Object
 
 
 
@@ -8869,30 +8961,15 @@ Private Function EnsureWideSummaryGroup(ByVal groupStore As Object, ByVal groupO
 
 
 
-    If groupStore.Exists(ruleName) Then
-
-
-
-
-
-
-
-        Set EnsureWideSummaryGroup = groupStore(ruleName)
-
-
-
-
-
-
-
+    If groupStore.Exists(groupKey) Then
+        Set groupItem = groupStore(groupKey)
+        If groupItem.Exists("outputRowPath") Then
+            groupItem("outputRowPath") = (CBool(groupItem("outputRowPath")) Or outputRowPath)
+        Else
+            groupItem.Add "outputRowPath", outputRowPath
+        End If
+        Set EnsureWideSummaryGroup = groupItem
         Exit Function
-
-
-
-
-
-
-
     End If
 
 
@@ -9007,13 +9084,21 @@ Private Function EnsureWideSummaryGroup(ByVal groupStore As Object, ByVal groupO
 
     groupItem.Add "colOrder", colOrder
 
+    groupItem.Add "groupKey", groupKey
+    groupItem.Add "displayRuleName", ruleName
+    groupItem.Add "targetWorkbookPath", targetWorkbookPath
+    groupItem.Add "targetSheetName", targetSheetName
+    groupItem.Add "targetWriteEnabled", targetWriteEnabled
+    groupItem.Add "hasTarget", (targetWriteEnabled And Len(Trim$(targetWorkbookPath)) > 0 And Len(Trim$(targetSheetName)) > 0)
+    groupItem.Add "outputRowPath", outputRowPath
 
 
 
 
 
 
-    groupStore.Add ruleName, groupItem
+
+    groupStore.Add groupKey, groupItem
 
 
 
@@ -9021,7 +9106,7 @@ Private Function EnsureWideSummaryGroup(ByVal groupStore As Object, ByVal groupO
 
 
 
-    groupOrder.Add ruleName
+    groupOrder.Add groupKey
 
 
 
@@ -9052,6 +9137,81 @@ End Function
 
 
 
+
+Private Function BuildWideSummaryGroupKey(ByVal ruleName As String, ByVal targetWorkbookPath As String, ByVal targetSheetName As String, ByVal targetWriteEnabled As Boolean) As String
+    Dim wbKey As String
+    Dim wsKey As String
+
+    wbKey = LCase$(Trim$(ResolveWideSummaryWorkbookPath(targetWorkbookPath)))
+    wsKey = LCase$(Trim$(targetSheetName))
+    BuildWideSummaryGroupKey = ruleName & "||" & wbKey & "||" & wsKey & "||" & IIf(targetWriteEnabled, "1", "0")
+End Function
+
+Private Function ParseWideSummaryTargetWriteEnabled(ByVal rawText As String, Optional ByVal defaultValue As Boolean = True) As Boolean
+    Dim txt As String
+
+    txt = LCase$(Trim$(rawText))
+    If txt = "" Then
+        ParseWideSummaryTargetWriteEnabled = defaultValue
+        Exit Function
+    End If
+
+    Select Case txt
+        Case "1", "y", "yes", "true", "on", "是", "启用"
+            ParseWideSummaryTargetWriteEnabled = True
+        Case "0", "n", "no", "false", "off", "否", "禁用"
+            ParseWideSummaryTargetWriteEnabled = False
+        Case Else
+            ParseWideSummaryTargetWriteEnabled = defaultValue
+    End Select
+End Function
+
+Private Function GetRuleTextByHeaderOrIndex(ByVal wsRule As Worksheet, ByVal ruleRow As Long, ByVal defaultCol As Long, ByVal headerName1 As String, Optional ByVal headerName2 As String = "", Optional ByVal headerName3 As String = "") As String
+    Dim txt As String
+    Dim colNo As Long
+
+    txt = Trim$(CStr(wsRule.Cells(ruleRow, defaultCol).Value))
+    If txt <> "" Then
+        GetRuleTextByHeaderOrIndex = txt
+        Exit Function
+    End If
+
+    colNo = FindRuleHeaderColumn(wsRule, headerName1, headerName2, headerName3)
+    If colNo > 0 Then
+        GetRuleTextByHeaderOrIndex = Trim$(CStr(wsRule.Cells(ruleRow, colNo).Value))
+    End If
+End Function
+
+Private Function FindRuleHeaderColumn(ByVal wsRule As Worksheet, ByVal headerName1 As String, Optional ByVal headerName2 As String = "", Optional ByVal headerName3 As String = "") As Long
+    Dim lastCol As Long
+    Dim c As Long
+    Dim h As String
+
+    lastCol = GetLastUsedCol(wsRule)
+    If lastCol < 1 Then Exit Function
+
+    For c = 1 To lastCol
+        h = Trim$(CStr(wsRule.Cells(1, c).Value))
+        If h <> "" Then
+            If StrComp(h, headerName1, vbTextCompare) = 0 Then
+                FindRuleHeaderColumn = c
+                Exit Function
+            End If
+            If headerName2 <> "" Then
+                If StrComp(h, headerName2, vbTextCompare) = 0 Then
+                    FindRuleHeaderColumn = c
+                    Exit Function
+                End If
+            End If
+            If headerName3 <> "" Then
+                If StrComp(h, headerName3, vbTextCompare) = 0 Then
+                    FindRuleHeaderColumn = c
+                    Exit Function
+                End If
+            End If
+        End If
+    Next c
+End Function
 
 Private Function BuildWideSummarySheetName(ByVal rawRuleName As String, ByVal usedNames As Object) As String
 
@@ -9509,7 +9669,7 @@ End Function
 
 
 
-Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookName As String, ByVal dataDateText As String, ByVal ruleName As String, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal requiredColPaths As String, ByVal requiredRowPaths As String, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal pathMappings As Collection, ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colIndexMap As Object, ByVal colOrder As Collection, ByRef hitSheets As Long, ByRef skipRules As Long, ByRef outputRows As Long, ByRef conflictRows As Long)
+Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookName As String, ByVal dataDateText As String, ByVal ruleName As String, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal requiredColPaths As String, ByVal requiredRowPaths As String, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal pathMappings As Collection, ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colIndexMap As Object, ByVal colOrder As Collection, ByVal addUniqueSuffix As Boolean, ByRef hitSheets As Long, ByRef skipRules As Long, ByRef outputRows As Long, ByRef conflictRows As Long)
 
 
 
@@ -9622,6 +9782,7 @@ Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookNam
 
 
     Dim cellAddress As String
+    Dim effectiveRequiredRowPaths As String
 
 
 
@@ -9785,7 +9946,7 @@ Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookNam
 
 
 
-    Set rowPathMap = BuildMappedRowPathMap(sourceBookName, ws.Name, ruleName, ws, rowHeaderCols, dataStartRow, actualEndRow, skipKeywords, pathMappings, mappingLogMap)
+    Set rowPathMap = BuildMappedRowPathMap(sourceBookName, ws.Name, ruleName, ws, rowHeaderCols, dataStartRow, actualEndRow, skipKeywords, pathMappings, mappingLogMap, addUniqueSuffix)
 
 
 
@@ -9793,7 +9954,7 @@ Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookNam
 
 
 
-    Set colPathMap = BuildMappedColPathMap(sourceBookName, ws.Name, ruleName, headerText, dataStartCol, actualEndCol, pathMappings, colHeaderRows, mappingLogMap)
+    Set colPathMap = BuildMappedColPathMap(sourceBookName, ws.Name, ruleName, headerText, dataStartCol, actualEndCol, pathMappings, colHeaderRows, mappingLogMap, True)
 
 
 
@@ -9801,7 +9962,14 @@ Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookNam
 
 
 
-    If Not ValidateRequiredAnchors(requiredColPaths, requiredRowPaths, rowPathMap, colPathMap) Then
+    effectiveRequiredRowPaths = requiredRowPaths
+    If rowHeaderCols Is Nothing Then
+        effectiveRequiredRowPaths = ""
+    ElseIf rowHeaderCols.Count = 0 Then
+        effectiveRequiredRowPaths = ""
+    End If
+
+    If Not ValidateRequiredAnchors(requiredColPaths, effectiveRequiredRowPaths, rowPathMap, colPathMap) Then
 
 
 
@@ -9957,7 +10125,7 @@ Private Sub ExtractSheetToWideSummary(ByVal ws As Worksheet, ByVal sourceBookNam
 
 
 
-                            AddWideSummaryValue rowStore, rowOrder, colIndexMap, colOrder, sourceBookName, ws.Name, dataDateText, rowPath, colPath, cellValue, cellAddress, ruleName, conflictRows, valuesWritten
+                            AddWideSummaryValue rowStore, rowOrder, colIndexMap, colOrder, sourceBookName, ws.Name, dataDateText, rowPath, colPath, cellValue, cellAddress, ruleName, rowNo, addUniqueSuffix, conflictRows, valuesWritten
 
 
 
@@ -10055,7 +10223,7 @@ End Sub
 
 
 
-Private Function BuildMappedRowPathMap(ByVal sourceBookName As String, ByVal sourceSheetName As String, ByVal ruleName As String, ByVal ws As Worksheet, ByVal rowHeaderCols As Collection, ByVal startRow As Long, ByVal endRow As Long, ByVal skipKeywords As String, ByVal pathMappings As Collection, ByVal mappingLogMap As Object) As Object
+Private Function BuildMappedRowPathMap(ByVal sourceBookName As String, ByVal sourceSheetName As String, ByVal ruleName As String, ByVal ws As Worksheet, ByVal rowHeaderCols As Collection, ByVal startRow As Long, ByVal endRow As Long, ByVal skipKeywords As String, ByVal pathMappings As Collection, ByVal mappingLogMap As Object, ByVal addUniqueSuffix As Boolean) As Object
 
 
 
@@ -10157,6 +10325,22 @@ Private Function BuildMappedRowPathMap(ByVal sourceBookName As String, ByVal sou
 
     result.CompareMode = vbTextCompare
 
+    If rowHeaderCols Is Nothing Then
+        For rowNo = startRow To endRow
+            result(CStr(rowNo)) = "ROW#" & CStr(rowNo)
+        Next rowNo
+        Set BuildMappedRowPathMap = result
+        Exit Function
+    End If
+
+    If rowHeaderCols.Count = 0 Then
+        For rowNo = startRow To endRow
+            result(CStr(rowNo)) = "ROW#" & CStr(rowNo)
+        Next rowNo
+        Set BuildMappedRowPathMap = result
+        Exit Function
+    End If
+
 
 
 
@@ -10221,7 +10405,7 @@ Private Function BuildMappedRowPathMap(ByVal sourceBookName As String, ByVal sou
 
 
 
-            If CLng(countMap(rawPath)) > 1 Then
+            If addUniqueSuffix And CLng(countMap(rawPath)) > 1 Then
 
 
 
@@ -10413,7 +10597,7 @@ End Function
 
 
 
-Private Function BuildMappedColPathMap(ByVal sourceBookName As String, ByVal sourceSheetName As String, ByVal ruleName As String, ByRef headerText() As String, ByVal startCol As Long, ByVal endCol As Long, ByVal pathMappings As Collection, ByVal colHeaderRows As Collection, ByVal mappingLogMap As Object) As Object
+Private Function BuildMappedColPathMap(ByVal sourceBookName As String, ByVal sourceSheetName As String, ByVal ruleName As String, ByRef headerText() As String, ByVal startCol As Long, ByVal endCol As Long, ByVal pathMappings As Collection, ByVal colHeaderRows As Collection, ByVal mappingLogMap As Object, ByVal addUniqueSuffix As Boolean) As Object
 
 
 
@@ -10536,6 +10720,7 @@ Private Function BuildMappedColPathMap(ByVal sourceBookName As String, ByVal sou
     For colNo = startCol To endCol
 
         rawPath = BuildColPath(headerText, colNo)
+        If rawPath = "" Then rawPath = BuildFallbackColPath(colNo)
 
         rawPaths(colNo) = rawPath
 
@@ -10583,7 +10768,7 @@ Private Function BuildMappedColPathMap(ByVal sourceBookName As String, ByVal sou
 
 
 
-            If CLng(countMap(rawPath)) > 1 Then
+            If addUniqueSuffix And CLng(countMap(rawPath)) > 1 Then
 
 
 
@@ -10775,7 +10960,7 @@ End Function
 
 
 
-Private Sub AddWideSummaryValue(ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colIndexMap As Object, ByVal colOrder As Collection, ByVal sourceBookName As String, ByVal sourceSheetName As String, ByVal dataDateText As String, ByVal rowPath As String, ByVal colPath As String, ByVal cellValue As Variant, ByVal cellAddress As String, ByVal ruleName As String, ByRef conflictRows As Long, ByRef valuesWritten As Long)
+Private Sub AddWideSummaryValue(ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colIndexMap As Object, ByVal colOrder As Collection, ByVal sourceBookName As String, ByVal sourceSheetName As String, ByVal dataDateText As String, ByVal rowPath As String, ByVal colPath As String, ByVal cellValue As Variant, ByVal cellAddress As String, ByVal ruleName As String, ByVal sourceRowNo As Long, ByVal rowSuffixEnabled As Boolean, ByRef conflictRows As Long, ByRef valuesWritten As Long)
 
 
 
@@ -10826,6 +11011,9 @@ Private Sub AddWideSummaryValue(ByVal rowStore As Object, ByVal rowOrder As Coll
 
 
     rowKey = sourceBookName & "|" & sourceSheetName & "|" & dataDateText & "|" & rowPath
+    If Not rowSuffixEnabled Then
+        rowKey = rowKey & "|ROW#" & CStr(sourceRowNo)
+    End If
 
 
 
@@ -11247,7 +11435,7 @@ End Sub
 
 
 
-Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colOrder As Collection)
+Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colOrder As Collection, ByVal outputRowPath As Boolean)
 
 
 
@@ -11320,6 +11508,7 @@ Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Objec
 
 
     Dim colPath As String
+    Dim fixedCols As Long
 
 
 
@@ -11343,7 +11532,8 @@ Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Objec
 
 
 
-    colCount = 4 + colOrder.Count
+    fixedCols = WideSummaryFixedColCount(outputRowPath)
+    colCount = fixedCols + colOrder.Count
 
 
 
@@ -11383,7 +11573,9 @@ Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Objec
 
 
 
-    ws.Cells(1, wrRowPath).Value = "行头路径"
+    If outputRowPath Then
+        ws.Cells(1, wrRowPath).Value = "行头路径"
+    End If
 
 
 
@@ -11399,7 +11591,7 @@ Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Objec
 
 
 
-        ws.Cells(1, 4 + dynIdx).Value = CStr(colOrder(dynIdx))
+        ws.Cells(1, fixedCols + dynIdx).Value = CStr(colOrder(dynIdx))
 
 
 
@@ -11519,7 +11711,7 @@ Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Objec
 
 
 
-        outputArr(rowIdx, wrRowPath) = rowItem("rowPath")
+        If outputRowPath Then outputArr(rowIdx, wrRowPath) = rowItem("rowPath")
 
 
 
@@ -11567,7 +11759,7 @@ Private Sub WriteWideSummarySheet(ByVal ws As Worksheet, ByVal rowStore As Objec
 
 
 
-                outputArr(rowIdx, 4 + dynIdx) = valueMap(colPath)
+                outputArr(rowIdx, fixedCols + dynIdx) = valueMap(colPath)
 
 
 
@@ -11635,11 +11827,12 @@ End Function
 
 
 
-Private Sub ApplyWideSummarySheetLayout(ByVal ws As Worksheet, ByVal dynamicColCount As Long)
+Private Sub ApplyWideSummarySheetLayout(ByVal ws As Worksheet, ByVal dynamicColCount As Long, ByVal outputRowPath As Boolean)
 
 
 
     Dim lastCol As Long
+    Dim fixedCols As Long
 
 
 
@@ -11647,19 +11840,19 @@ Private Sub ApplyWideSummarySheetLayout(ByVal ws As Worksheet, ByVal dynamicColC
 
 
 
-    ws.Columns("A:D").AutoFit
+    If outputRowPath Then
+        ws.Columns("A:D").AutoFit
+    Else
+        ws.Columns("A:C").AutoFit
+    End If
 
 
 
     If dynamicColCount <= 0 Then Exit Sub
 
-
-
-    lastCol = 4 + dynamicColCount
-
-
-
-    ws.Range(ws.Cells(1, 5), ws.Cells(1, lastCol)).EntireColumn.ColumnWidth = WIDE_DYNAMIC_COL_WIDTH
+    fixedCols = WideSummaryFixedColCount(outputRowPath)
+    lastCol = fixedCols + dynamicColCount
+    ws.Range(ws.Cells(1, fixedCols + 1), ws.Cells(1, lastCol)).EntireColumn.ColumnWidth = WIDE_DYNAMIC_COL_WIDTH
 
 
 
@@ -11671,7 +11864,7 @@ End Sub
 
 
 
-Private Function BuildWideSummaryMessage(ByVal hitBooks As Long, ByVal hitSheets As Long, ByVal outputRows As Long, ByVal dynamicCols As Long, ByVal skipRules As Long, ByVal skipBooks As Long, ByVal conflictRows As Long, ByVal resultSheetCount As Long) As String
+Private Function BuildWideSummaryMessage(ByVal hitBooks As Long, ByVal hitSheets As Long, ByVal outputRows As Long, ByVal dynamicCols As Long, ByVal skipRules As Long, ByVal skipBooks As Long, ByVal conflictRows As Long, ByVal resultSheetCount As Long, ByVal targetWriteGroups As Long, ByVal targetSkipGroups As Long, ByVal targetAppendRows As Long) As String
 
 
 
@@ -11741,7 +11934,14 @@ Private Function BuildWideSummaryMessage(ByVal hitBooks As Long, ByVal hitSheets
 
 
 
-    BuildWideSummaryMessage = BuildWideSummaryMessage & vbCrLf & vbCrLf & "结果已按规则名称分Sheet写入新工作簿"
+    BuildWideSummaryMessage = BuildWideSummaryMessage & vbCrLf & "目标写入组：" & targetWriteGroups
+    BuildWideSummaryMessage = BuildWideSummaryMessage & vbCrLf & "目标跳过组：" & targetSkipGroups
+    BuildWideSummaryMessage = BuildWideSummaryMessage & vbCrLf & "目标新增行：" & targetAppendRows
+    If resultSheetCount > 0 Then
+        BuildWideSummaryMessage = BuildWideSummaryMessage & vbCrLf & vbCrLf & "未配置目标的规则已写入临时结果工作簿"
+    Else
+        BuildWideSummaryMessage = BuildWideSummaryMessage & vbCrLf & vbCrLf & "本次未生成临时结果工作簿（均已按配置写入目标）"
+    End If
 
 
 
@@ -11764,6 +11964,906 @@ End Function
 
 
 
+
+Private Function AppendWideSummaryGroupToTarget(ByVal groupItem As Object, ByVal targetCache As Object, ByVal targetOpenedByCode As Object, ByVal targetModified As Object, ByRef appendedRows As Long, ByRef detail As String) As Boolean
+    Dim targetPath As String
+    Dim targetSheet As String
+    Dim resolvedPath As String
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim sourceColCount As Long
+    Dim targetColCount As Long
+    Dim rowCount As Long
+    Dim lastRow As Long
+    Dim headerArr As Variant
+    Dim mappedArr As Variant
+    Dim colMap As Variant
+    Dim seen As Object
+    Dim keptRows As Long
+    Dim addedCols As Long
+    Dim hasMismatch As Boolean
+    Dim mismatchDetail As String
+    Dim userChoice As String
+    Dim stageText As String
+    Dim i As Long
+
+    On Error GoTo FailSafe
+
+    stageText = "读取目标配置"
+    targetPath = Trim$(CStr(groupItem("targetWorkbookPath")))
+    targetSheet = Trim$(CStr(groupItem("targetSheetName")))
+    If Len(targetPath) = 0 Or Len(targetSheet) = 0 Then
+        detail = "目标工作簿或目标工作表为空"
+        Exit Function
+    End If
+
+    stageText = "打开目标工作簿"
+    Set wb = AcquireWideSummaryTargetWorkbook(targetPath, targetCache, targetOpenedByCode, resolvedPath, detail)
+    If wb Is Nothing Then Exit Function
+    stageText = "定位目标工作表"
+    Set ws = EnsureWideSummaryTargetSheet(wb, targetSheet)
+    If ws Is Nothing Then
+        detail = "无法创建或定位目标工作表"
+        Exit Function
+    End If
+
+    sourceColCount = WideSummaryFixedColCount(CBool(groupItem("outputRowPath"))) + CLng(groupItem("colOrder").Count)
+    If sourceColCount <= 0 Then
+        detail = "动态列无效"
+        Exit Function
+    End If
+
+    stageText = "构建汇总表头"
+    headerArr = BuildWideSummaryHeaderArray(groupItem("colOrder"), CBool(groupItem("outputRowPath")))
+    rowCount = CLng(groupItem("rowOrder").Count)
+
+    stageText = "构建目标表头映射"
+    lastRow = GetLastUsedRow(ws)
+    If IsWideSummaryHeaderEmpty(ws, CBool(groupItem("outputRowPath"))) Then
+        ws.Range(ws.Cells(1, 1), ws.Cells(1, sourceColCount)).Value2 = headerArr
+        ReDim colMap(1 To sourceColCount)
+        targetColCount = sourceColCount
+        For i = 1 To sourceColCount
+            colMap(i) = i
+        Next i
+        lastRow = 1
+    Else
+        If Not BuildWideSummaryHeaderMap(ws, headerArr, sourceColCount, WideSummaryFixedColCount(CBool(groupItem("outputRowPath"))), colMap, targetColCount, addedCols, hasMismatch, mismatchDetail, True) Then
+            detail = mismatchDetail
+            Exit Function
+        End If
+        If hasMismatch Then
+            If Not ConfirmWideSummaryHeaderMismatch(mismatchDetail, userChoice) Then
+                detail = "目标表头不一致，用户选择" & userChoice & "，已回退"
+                Exit Function
+            End If
+            If Not BuildWideSummaryHeaderMap(ws, headerArr, sourceColCount, WideSummaryFixedColCount(CBool(groupItem("outputRowPath"))), colMap, targetColCount, addedCols, hasMismatch, mismatchDetail, False) Then
+                detail = mismatchDetail
+                Exit Function
+            End If
+        End If
+    End If
+
+    stageText = "构建去重键集"
+    Set seen = BuildWideSummaryExistingKeySetByMap(ws, colMap, sourceColCount)
+    stageText = "筛选并映射新增行"
+    mappedArr = FilterAndMapWideSummaryNewRowsFromStore(groupItem("rowStore"), groupItem("rowOrder"), groupItem("colOrder"), sourceColCount, WideSummaryFixedColCount(CBool(groupItem("outputRowPath"))), targetColCount, colMap, seen, keptRows)
+    appendedRows = keptRows
+
+    If keptRows > 0 Then
+        stageText = "写入目标数据"
+        ws.Range(ws.Cells(lastRow + 1, 1), ws.Cells(lastRow + keptRows, targetColCount)).Value2 = mappedArr
+        DictSetValue targetModified, resolvedPath, True
+    End If
+
+    detail = "映射列数=" & sourceColCount & "->" & targetColCount & " 新增列=" & addedCols
+    AppendWideSummaryGroupToTarget = True
+    Exit Function
+
+FailSafe:
+    detail = "阶段=" & stageText & " 错误=" & CStr(Err.Number) & " " & Err.Description
+    Err.Clear
+End Function
+
+Private Function ConfirmWideSummaryHeaderMismatch(ByVal mismatchDetail As String, ByRef userChoice As String) As Boolean
+    Dim ans As VbMsgBoxResult
+
+    userChoice = "否"
+    If Not gWideHeaderDecisionSet Then
+        ans = MsgBox("检测到目标表头不一致：" & vbCrLf & mismatchDetail & vbCrLf & vbCrLf & "是否继续写入目标？" & vbCrLf & "选择“是”将按同名列对齐写入，新列追加到末尾。", vbQuestion + vbYesNo, "规则汇总（宽表）")
+        gWideHeaderDecisionSet = True
+        gWideHeaderWriteTarget = (ans = vbYes)
+        userChoice = IIf(gWideHeaderWriteTarget, "是", "否")
+        RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "表头冲突选择", "", "", "", "提示", "用户选择=" & userChoice & "；" & mismatchDetail, ""
+    Else
+        userChoice = IIf(gWideHeaderWriteTarget, "是", "否")
+    End If
+
+    ConfirmWideSummaryHeaderMismatch = gWideHeaderWriteTarget
+End Function
+
+Private Function BuildWideSummaryHeaderMap(ByVal ws As Worksheet, ByRef headerArr As Variant, ByVal sourceColCount As Long, ByVal fixedColCount As Long, ByRef colMap As Variant, ByRef targetColCount As Long, ByRef addedCols As Long, ByRef hasMismatch As Boolean, ByRef detail As String, ByVal detectOnly As Boolean) As Boolean
+    Dim expectedText As String
+    Dim actualText As String
+    Dim targetLastCol As Long
+    Dim existMap As Object
+    Dim c As Long
+    Dim hitCol As Long
+    Dim missCount As Long
+
+    On Error GoTo FailSafe
+    ReDim colMap(1 To sourceColCount)
+    addedCols = 0
+    hasMismatch = False
+    detail = ""
+
+    targetLastCol = GetLastUsedCol(ws)
+    If targetLastCol < fixedColCount Then targetLastCol = fixedColCount
+
+    Set existMap = CreateObject("Scripting.Dictionary")
+    existMap.CompareMode = vbTextCompare
+
+    For c = 1 To targetLastCol
+        actualText = NormalizeText(ws.Cells(1, c).Value2)
+        If actualText <> "" Then
+            If Not existMap.Exists(actualText) Then existMap.Add actualText, c
+        End If
+    Next c
+
+    For c = 1 To fixedColCount
+        expectedText = NormalizeText(headerArr(1, c))
+        actualText = NormalizeText(ws.Cells(1, c).Value2)
+        colMap(c) = c
+        If actualText = "" Then
+            If Not detectOnly Then ws.Cells(1, c).Value2 = CStr(headerArr(1, c))
+            hasMismatch = True
+            missCount = missCount + 1
+        ElseIf StrComp(actualText, expectedText, vbTextCompare) <> 0 Then
+            hasMismatch = True
+            If detectOnly Then
+                detail = "固定列表头不一致，列=" & c & " 期望=" & expectedText & " 实际=" & actualText
+                Exit Function
+            Else
+                ws.Cells(1, c).Value2 = CStr(headerArr(1, c))
+            End If
+        End If
+        If expectedText <> "" Then
+            If Not existMap.Exists(expectedText) Then existMap.Add expectedText, c
+        End If
+    Next c
+
+    For c = fixedColCount + 1 To sourceColCount
+        expectedText = NormalizeText(headerArr(1, c))
+        hitCol = 0
+        If expectedText <> "" Then
+            If existMap.Exists(expectedText) Then hitCol = CLng(existMap(expectedText))
+        End If
+        If hitCol > 0 Then
+            colMap(c) = hitCol
+            If hitCol <> c Then hasMismatch = True
+        Else
+            hasMismatch = True
+            If detectOnly Then
+                missCount = missCount + 1
+                colMap(c) = 0
+            Else
+                targetLastCol = targetLastCol + 1
+                ws.Cells(1, targetLastCol).Value2 = CStr(headerArr(1, c))
+                colMap(c) = targetLastCol
+                addedCols = addedCols + 1
+                If expectedText <> "" Then existMap(expectedText) = targetLastCol
+            End If
+        End If
+    Next c
+
+    If detectOnly Then
+        targetColCount = GetLastUsedCol(ws)
+        If targetColCount < fixedColCount Then targetColCount = fixedColCount
+        If hasMismatch Then
+            If detail = "" Then detail = "动态列存在不一致/缺失，缺失列数=" & missCount
+        Else
+            detail = "表头一致"
+        End If
+    Else
+        targetColCount = GetLastUsedCol(ws)
+        If targetColCount < sourceColCount Then targetColCount = sourceColCount
+        If hasMismatch Then detail = "已按同名表头映射并补齐新列，新增列=" & addedCols
+    End If
+
+    BuildWideSummaryHeaderMap = True
+    Exit Function
+
+FailSafe:
+    detail = "构建表头映射失败：" & CStr(Err.Number) & " " & Err.Description
+    Err.Clear
+End Function
+
+Private Function BuildWideSummaryExistingKeySetByMap(ByVal ws As Worksheet, ByRef colMap As Variant, ByVal sourceColCount As Long) As Object
+    Dim seen As Object
+    Dim lastRow As Long
+    Dim maxMappedCol As Long
+    Dim dataArr As Variant
+    Dim r As Long
+    Dim c As Long
+    Dim keyPart As String
+    Dim rowKey As String
+    Dim mappedCol As Long
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbBinaryCompare
+    lastRow = GetLastUsedRow(ws)
+    If lastRow < 2 Then
+        Set BuildWideSummaryExistingKeySetByMap = seen
+        Exit Function
+    End If
+
+    For c = 1 To sourceColCount
+        mappedCol = CLng(colMap(c))
+        If mappedCol > maxMappedCol Then maxMappedCol = mappedCol
+    Next c
+    If maxMappedCol < 1 Then
+        Set BuildWideSummaryExistingKeySetByMap = seen
+        Exit Function
+    End If
+
+    dataArr = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, maxMappedCol)).Value2
+    For r = 1 To UBound(dataArr, 1)
+        rowKey = ""
+        For c = 1 To sourceColCount
+            mappedCol = CLng(colMap(c))
+            If mappedCol > 0 Then
+                keyPart = NormalizeText(dataArr(r, mappedCol))
+                If c > 1 Then rowKey = rowKey & WIDE_DEDUP_SEP
+                rowKey = rowKey & keyPart
+            End If
+        Next c
+        If rowKey <> "" Then
+            If Not seen.Exists(rowKey) Then seen.Add rowKey, True
+        End If
+    Next r
+
+    Set BuildWideSummaryExistingKeySetByMap = seen
+End Function
+
+Private Function FilterAndMapWideSummaryNewRows(ByRef dataArr As Variant, ByVal rowCount As Long, ByVal sourceColCount As Long, ByVal targetColCount As Long, ByRef colMap As Variant, ByVal seen As Object, ByRef keptRows As Long) As Variant
+    Dim outArr() As Variant
+    Dim finalArr() As Variant
+    Dim rowKey As String
+    Dim keyPart As String
+    Dim r As Long
+    Dim c As Long
+    Dim mappedCol As Long
+
+    keptRows = 0
+    If rowCount <= 0 Then Exit Function
+    ReDim outArr(1 To rowCount, 1 To targetColCount)
+
+    For r = 1 To rowCount
+        rowKey = ""
+        For c = 1 To sourceColCount
+            keyPart = NormalizeText(dataArr(r, c))
+            If c > 1 Then rowKey = rowKey & WIDE_DEDUP_SEP
+            rowKey = rowKey & keyPart
+        Next c
+
+        If rowKey <> "" Then
+            If Not seen.Exists(rowKey) Then
+                keptRows = keptRows + 1
+                For c = 1 To sourceColCount
+                    mappedCol = CLng(colMap(c))
+                    If mappedCol > 0 Then outArr(keptRows, mappedCol) = dataArr(r, c)
+                Next c
+                seen.Add rowKey, True
+            End If
+        End If
+    Next r
+
+    If keptRows <= 0 Then Exit Function
+    If keptRows = rowCount Then
+        FilterAndMapWideSummaryNewRows = outArr
+    Else
+        ReDim finalArr(1 To keptRows, 1 To targetColCount)
+        For r = 1 To keptRows
+            For c = 1 To targetColCount
+                finalArr(r, c) = outArr(r, c)
+            Next c
+        Next r
+        FilterAndMapWideSummaryNewRows = finalArr
+    End If
+End Function
+
+Private Function FilterAndMapWideSummaryNewRowsFromStore(ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colOrder As Collection, ByVal sourceColCount As Long, ByVal fixedColCount As Long, ByVal targetColCount As Long, ByRef colMap As Variant, ByVal seen As Object, ByRef keptRows As Long) As Variant
+    Dim outArr() As Variant
+    Dim finalArr() As Variant
+    Dim rowIdx As Long
+    Dim dynIdx As Long
+    Dim colPath As String
+    Dim rowKey As String
+    Dim keyPart As String
+    Dim mappedCol As Long
+    Dim rowKeyId As Variant
+    Dim rowItem As Object
+    Dim valueMap As Object
+    Dim sourceBook As Variant
+    Dim sourceSheet As Variant
+    Dim dataDate As Variant
+    Dim rowPath As Variant
+    Dim oneValue As Variant
+    Dim c As Long
+
+    keptRows = 0
+    If rowOrder Is Nothing Then Exit Function
+    If rowOrder.Count <= 0 Then Exit Function
+
+    ReDim outArr(1 To rowOrder.Count, 1 To targetColCount)
+
+    For rowIdx = 1 To rowOrder.Count
+        rowKeyId = rowOrder(rowIdx)
+        Set rowItem = rowStore(CStr(rowKeyId))
+        Set valueMap = rowItem("values")
+
+        sourceBook = rowItem("sourceBook")
+        sourceSheet = rowItem("sourceSheet")
+        dataDate = rowItem("dataDate")
+        rowPath = rowItem("rowPath")
+
+        rowKey = NormalizeText(sourceBook) & WIDE_DEDUP_SEP & NormalizeText(sourceSheet) & WIDE_DEDUP_SEP & NormalizeText(dataDate)
+        If fixedColCount >= 4 Then rowKey = rowKey & WIDE_DEDUP_SEP & NormalizeText(rowPath)
+        For dynIdx = 1 To colOrder.Count
+            colPath = CStr(colOrder(dynIdx))
+            oneValue = ""
+            If valueMap.Exists(colPath) Then oneValue = valueMap(colPath)
+            keyPart = NormalizeText(oneValue)
+            rowKey = rowKey & WIDE_DEDUP_SEP & keyPart
+        Next dynIdx
+
+        If rowKey <> "" Then
+            If Not seen.Exists(rowKey) Then
+                keptRows = keptRows + 1
+
+                mappedCol = CLng(colMap(1))
+                If mappedCol > 0 Then outArr(keptRows, mappedCol) = sourceBook
+                mappedCol = CLng(colMap(2))
+                If mappedCol > 0 Then outArr(keptRows, mappedCol) = sourceSheet
+                mappedCol = CLng(colMap(3))
+                If mappedCol > 0 Then outArr(keptRows, mappedCol) = dataDate
+                If fixedColCount >= 4 Then
+                    mappedCol = CLng(colMap(4))
+                    If mappedCol > 0 Then outArr(keptRows, mappedCol) = rowPath
+                End If
+
+                For dynIdx = 1 To colOrder.Count
+                    mappedCol = CLng(colMap(fixedColCount + dynIdx))
+                    If mappedCol > 0 Then
+                        colPath = CStr(colOrder(dynIdx))
+                        If valueMap.Exists(colPath) Then
+                            outArr(keptRows, mappedCol) = valueMap(colPath)
+                        End If
+                    End If
+                Next dynIdx
+
+                seen.Add rowKey, True
+            End If
+        End If
+    Next rowIdx
+
+    If keptRows <= 0 Then Exit Function
+    If keptRows = rowOrder.Count Then
+        FilterAndMapWideSummaryNewRowsFromStore = outArr
+    Else
+        ReDim finalArr(1 To keptRows, 1 To targetColCount)
+        For rowIdx = 1 To keptRows
+            For c = 1 To targetColCount
+                finalArr(rowIdx, c) = outArr(rowIdx, c)
+            Next c
+        Next rowIdx
+        FilterAndMapWideSummaryNewRowsFromStore = finalArr
+    End If
+End Function
+
+Private Function WideSummaryFixedColCount(ByVal outputRowPath As Boolean) As Long
+    If outputRowPath Then
+        WideSummaryFixedColCount = 4
+    Else
+        WideSummaryFixedColCount = 3
+    End If
+End Function
+
+Private Function BuildWideSummaryHeaderArray(ByVal colOrder As Collection, ByVal outputRowPath As Boolean) As Variant
+    Dim colCount As Long
+    Dim fixedCols As Long
+    Dim dynIdx As Long
+    Dim headerArr() As Variant
+
+    fixedCols = WideSummaryFixedColCount(outputRowPath)
+    colCount = fixedCols + colOrder.Count
+    ReDim headerArr(1 To 1, 1 To colCount)
+    headerArr(1, wrSourceBook) = "工作簿名"
+    headerArr(1, wrSourceSheet) = "工作表名"
+    headerArr(1, wrDataDate) = "数据日期"
+    If outputRowPath Then
+        headerArr(1, wrRowPath) = "行头路径"
+    End If
+    For dynIdx = 1 To colOrder.Count
+        headerArr(1, fixedCols + dynIdx) = CStr(colOrder(dynIdx))
+    Next dynIdx
+    BuildWideSummaryHeaderArray = headerArr
+End Function
+
+Private Function BuildWideSummaryDataArray(ByVal rowStore As Object, ByVal rowOrder As Collection, ByVal colOrder As Collection, ByVal outputRowPath As Boolean) As Variant
+    Dim rowCount As Long
+    Dim colCount As Long
+    Dim fixedCols As Long
+    Dim outputArr() As Variant
+    Dim rowIdx As Long
+    Dim dynIdx As Long
+    Dim rowKey As Variant
+    Dim rowItem As Object
+    Dim valueMap As Object
+    Dim colPath As String
+
+    rowCount = rowOrder.Count
+    fixedCols = WideSummaryFixedColCount(outputRowPath)
+    colCount = fixedCols + colOrder.Count
+    If rowCount <= 0 Then
+        ReDim outputArr(1 To 1, 1 To colCount)
+        BuildWideSummaryDataArray = outputArr
+        Exit Function
+    End If
+
+    ReDim outputArr(1 To rowCount, 1 To colCount)
+    For rowIdx = 1 To rowCount
+        rowKey = rowOrder(rowIdx)
+        Set rowItem = rowStore(CStr(rowKey))
+        outputArr(rowIdx, wrSourceBook) = rowItem("sourceBook")
+        outputArr(rowIdx, wrSourceSheet) = rowItem("sourceSheet")
+        outputArr(rowIdx, wrDataDate) = rowItem("dataDate")
+        If outputRowPath Then outputArr(rowIdx, wrRowPath) = rowItem("rowPath")
+        Set valueMap = rowItem("values")
+        For dynIdx = 1 To colOrder.Count
+            colPath = CStr(colOrder(dynIdx))
+            If valueMap.Exists(colPath) Then
+                outputArr(rowIdx, fixedCols + dynIdx) = valueMap(colPath)
+            End If
+        Next dynIdx
+    Next rowIdx
+    BuildWideSummaryDataArray = outputArr
+End Function
+
+Private Function IsWideSummaryHeaderEmpty(ByVal ws As Worksheet, ByVal outputRowPath As Boolean) As Boolean
+    If NormalizeText(ws.Cells(1, 1).Value2) <> "" Then Exit Function
+    If NormalizeText(ws.Cells(1, 2).Value2) <> "" Then Exit Function
+    If NormalizeText(ws.Cells(1, 3).Value2) <> "" Then Exit Function
+    If outputRowPath Then
+        If NormalizeText(ws.Cells(1, 4).Value2) <> "" Then Exit Function
+    End If
+    IsWideSummaryHeaderEmpty = True
+End Function
+
+Private Function WideSummaryHeadersCompatible(ByVal ws As Worksheet, ByRef headerArr As Variant, ByVal colCount As Long, ByRef detail As String) As Boolean
+    Dim c As Long
+    Dim expectedText As String
+    Dim actualText As String
+    Dim targetLastCol As Long
+
+    targetLastCol = GetLastUsedCol(ws)
+    If targetLastCol < colCount Then
+        detail = "目标表头列数不足，期望=" & colCount & " 实际=" & targetLastCol
+        Exit Function
+    End If
+
+    For c = 1 To colCount
+        expectedText = NormalizeText(headerArr(1, c))
+        actualText = NormalizeText(ws.Cells(1, c).Value2)
+        If StrComp(expectedText, actualText, vbTextCompare) <> 0 Then
+            detail = "目标表头不一致，列=" & c & " 期望=" & expectedText & " 实际=" & actualText
+            Exit Function
+        End If
+    Next c
+
+    WideSummaryHeadersCompatible = True
+End Function
+
+Private Function BuildWideSummaryExistingKeySet(ByVal ws As Worksheet, ByVal colCount As Long) As Object
+    Dim seen As Object
+    Dim lastRow As Long
+    Dim dataArr As Variant
+    Dim r As Long
+    Dim rowKey As String
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbBinaryCompare
+    lastRow = GetLastUsedRow(ws)
+    If lastRow < 2 Then
+        Set BuildWideSummaryExistingKeySet = seen
+        Exit Function
+    End If
+
+    dataArr = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, colCount)).Value2
+    For r = 1 To UBound(dataArr, 1)
+        rowKey = ""
+        If BuildWideSummaryRowKeyFromArray(dataArr, r, colCount, rowKey) Then
+            If Not seen.Exists(rowKey) Then seen.Add rowKey, True
+        End If
+    Next r
+
+    Set BuildWideSummaryExistingKeySet = seen
+End Function
+
+Private Function FilterWideSummaryNewRows(ByRef dataArr As Variant, ByVal rowCount As Long, ByVal colCount As Long, ByVal seen As Object, ByRef keptRows As Long) As Variant
+    Dim outArr() As Variant
+    Dim finalArr() As Variant
+    Dim rowKey As String
+    Dim r As Long
+    Dim c As Long
+
+    keptRows = 0
+    If rowCount <= 0 Then Exit Function
+    ReDim outArr(1 To rowCount, 1 To colCount)
+
+    For r = 1 To rowCount
+        rowKey = ""
+        If BuildWideSummaryRowKeyFromArray(dataArr, r, colCount, rowKey) Then
+            If Not seen.Exists(rowKey) Then
+                keptRows = keptRows + 1
+                For c = 1 To colCount
+                    outArr(keptRows, c) = dataArr(r, c)
+                Next c
+                seen.Add rowKey, True
+            End If
+        End If
+    Next r
+
+    If keptRows <= 0 Then Exit Function
+    If keptRows = rowCount Then
+        FilterWideSummaryNewRows = outArr
+    Else
+        ReDim finalArr(1 To keptRows, 1 To colCount)
+        For r = 1 To keptRows
+            For c = 1 To colCount
+                finalArr(r, c) = outArr(r, c)
+            Next c
+        Next r
+        FilterWideSummaryNewRows = finalArr
+    End If
+End Function
+
+Private Function BuildWideSummaryRowKeyFromArray(ByRef dataArr As Variant, ByVal rowNo As Long, ByVal colCount As Long, ByRef outKey As String) As Boolean
+    Dim c As Long
+    Dim txt As String
+    Dim hasValue As Boolean
+
+    outKey = ""
+    For c = 1 To colCount
+        txt = NormalizeWideDedupeToken(dataArr(rowNo, c), c)
+        outKey = outKey & WIDE_DEDUP_SEP & CStr(LenB(txt)) & ":" & txt
+        If LenB(txt) > 0 Then hasValue = True
+    Next c
+    BuildWideSummaryRowKeyFromArray = hasValue
+End Function
+
+Private Function NormalizeWideDedupeToken(ByVal rawValue As Variant, ByVal colNo As Long) As String
+    Dim txt As String
+    Dim numValue As Double
+
+    txt = NormalizeText(rawValue)
+    If txt = "" Then Exit Function
+
+    If colNo = wrDataDate Then
+        If TryParseComparableNumber(rawValue, numValue) Or TryParseComparableNumber(txt, numValue) Then
+            NormalizeWideDedupeToken = "D:" & CStr(CLng(numValue))
+            Exit Function
+        End If
+    End If
+
+    If colNo >= 5 Then
+        If TryParseComparableNumber(rawValue, numValue) Or TryParseComparableNumber(txt, numValue) Then
+            NormalizeWideDedupeToken = "N:" & Format$(numValue, "0.###############")
+            Exit Function
+        End If
+    End If
+
+    NormalizeWideDedupeToken = "T:" & txt
+End Function
+
+Private Function TryParseComparableNumber(ByVal rawValue As Variant, ByRef outNumber As Double) As Boolean
+    Dim txt As String
+    Dim normalizedDate As String
+
+    On Error GoTo FailSafe
+    If IsError(rawValue) Or IsEmpty(rawValue) Then Exit Function
+
+    If IsNumeric(rawValue) Then
+        outNumber = CDbl(rawValue)
+        TryParseComparableNumber = True
+        Exit Function
+    End If
+
+    txt = NormalizeText(rawValue)
+    If txt = "" Then Exit Function
+
+    If IsDate(txt) Then
+        outNumber = CDbl(CDate(txt))
+        TryParseComparableNumber = True
+        Exit Function
+    End If
+
+    If TryParseDateFromText(txt, normalizedDate) Then
+        If normalizedDate <> "" Then
+            outNumber = CDbl(CDate(normalizedDate))
+            TryParseComparableNumber = True
+            Exit Function
+        End If
+    End If
+
+    If IsNumeric(Replace(txt, ",", "")) Then
+        outNumber = CDbl(Replace(txt, ",", ""))
+        TryParseComparableNumber = True
+        Exit Function
+    End If
+
+    Exit Function
+FailSafe:
+    Err.Clear
+    TryParseComparableNumber = False
+End Function
+
+Private Function AcquireWideSummaryTargetWorkbook(ByVal rawPath As String, ByVal targetCache As Object, ByVal targetOpenedByCode As Object, ByRef resolvedPath As String, ByRef messageText As String) As Workbook
+    Dim wb As Workbook
+    Dim stageText As String
+
+    On Error GoTo FailSafe
+
+    stageText = "解析目标路径"
+    resolvedPath = ResolveWideSummaryWorkbookPath(rawPath)
+    If Len(resolvedPath) = 0 Then
+        messageText = "目标工作簿路径无效"
+        Exit Function
+    End If
+
+    stageText = "命中缓存"
+    If ObjectHasKey(targetCache, resolvedPath) Then
+        On Error Resume Next
+        Set AcquireWideSummaryTargetWorkbook = DictGetObject(targetCache, resolvedPath)
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    stageText = "查找已打开工作簿"
+    Set wb = FindWideSummaryOpenWorkbookByPath(resolvedPath)
+    If wb Is Nothing Then
+        stageText = "打开或新建目标工作簿"
+        If WideSummaryFileExists(resolvedPath) Then
+            Set wb = Workbooks.Open(resolvedPath, ReadOnly:=False, UpdateLinks:=0, AddToMru:=False)
+            DictSetValue targetOpenedByCode, resolvedPath, True
+        Else
+            Set wb = Workbooks.Add(xlWBATWorksheet)
+            DictSetValue targetOpenedByCode, resolvedPath, True
+        End If
+    Else
+        DictSetValue targetOpenedByCode, resolvedPath, False
+    End If
+
+    stageText = "写入缓存"
+    DictSetObject targetCache, resolvedPath, wb
+    Set AcquireWideSummaryTargetWorkbook = wb
+    Exit Function
+
+FailSafe:
+    messageText = "阶段=" & stageText & " 错误=" & CStr(Err.Number) & " " & Err.Description
+    Err.Clear
+End Function
+
+Private Function EnsureWideSummaryTargetSheet(ByVal wb As Workbook, ByVal sheetName As String) As Worksheet
+    Dim ws As Worksheet
+    Dim finalName As String
+
+    On Error Resume Next
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+    If ws Is Nothing Then
+        Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
+        finalName = SanitizeWideSummarySheetName(sheetName)
+        If Len(finalName) = 0 Then finalName = "规则汇总结果"
+        On Error Resume Next
+        ws.Name = finalName
+        If Err.Number <> 0 Then
+            Err.Clear
+            ws.Name = BuildWideSummarySheetName(finalName, CreateObject("Scripting.Dictionary"))
+        End If
+        On Error GoTo 0
+    End If
+    Set EnsureWideSummaryTargetSheet = ws
+End Function
+
+Private Sub SaveAndCloseWideSummaryTargetWorkbooks(ByVal targetCache As Object, ByVal targetOpenedByCode As Object, ByVal targetModified As Object)
+    Dim k As Variant
+    Dim wb As Workbook
+    Dim pathText As String
+    Dim shouldSave As Boolean
+
+    If targetCache Is Nothing Then Exit Sub
+    For Each k In targetCache
+        pathText = CStr(k)
+        Set wb = DictGetObject(targetCache, pathText)
+        If ObjectHasKey(targetModified, pathText) Then
+            shouldSave = DictGetBool(targetOpenedByCode, pathText)
+            If shouldSave Then
+                On Error GoTo SaveFail
+                If WideSummaryFileExists(pathText) Then
+                    wb.Save
+                Else
+                    EnsureWideSummaryParentFolder pathText
+                    wb.SaveAs fileName:=pathText, FileFormat:=GetWideSummarySaveFormat(pathText)
+                End If
+                On Error GoTo 0
+            End If
+        End If
+        If ObjectHasKey(targetOpenedByCode, pathText) Then
+            If DictGetBool(targetOpenedByCode, pathText) Then wb.Close SaveChanges:=False
+        End If
+    Next k
+    Exit Sub
+
+SaveFail:
+    RunLog_WriteRow WIDE_SUMMARY_LOG_KEY, "目标保存失败", "", pathText, "", "失败", CStr(Err.Number) & " " & Err.Description, ""
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+Private Sub CloseWideSummaryTargetWorkbooks(ByVal targetCache As Object, ByVal targetOpenedByCode As Object)
+    Dim k As Variant
+    Dim pathText As String
+    Dim wb As Workbook
+
+    If targetCache Is Nothing Then Exit Sub
+    For Each k In targetCache
+        pathText = CStr(k)
+        If ObjectHasKey(targetOpenedByCode, pathText) Then
+            If DictGetBool(targetOpenedByCode, pathText) Then
+                Set wb = DictGetObject(targetCache, pathText)
+                On Error Resume Next
+                wb.Close SaveChanges:=False
+                On Error GoTo 0
+            End If
+        End If
+    Next k
+End Sub
+
+Private Function ObjectHasKey(ByVal obj As Object, ByVal keyText As String) As Boolean
+    On Error GoTo FailSafe
+    If obj Is Nothing Then Exit Function
+    ObjectHasKey = CBool(obj.Exists(keyText))
+    Exit Function
+FailSafe:
+    Err.Clear
+    ObjectHasKey = False
+End Function
+
+Private Sub DictSetValue(ByVal obj As Object, ByVal keyText As String, ByVal valueData As Variant)
+    On Error Resume Next
+    If obj Is Nothing Then Exit Sub
+    If obj.Exists(keyText) Then obj.Remove keyText
+    obj.Add keyText, valueData
+    On Error GoTo 0
+End Sub
+
+Private Sub DictSetObject(ByVal obj As Object, ByVal keyText As String, ByVal valueObj As Object)
+    On Error Resume Next
+    If obj Is Nothing Then Exit Sub
+    If obj.Exists(keyText) Then obj.Remove keyText
+    obj.Add keyText, valueObj
+    On Error GoTo 0
+End Sub
+
+Private Function DictGetObject(ByVal obj As Object, ByVal keyText As String) As Object
+    On Error GoTo FailSafe
+    If obj Is Nothing Then Exit Function
+    If obj.Exists(keyText) Then
+        Set DictGetObject = obj.Item(keyText)
+    End If
+    Exit Function
+FailSafe:
+    Err.Clear
+End Function
+
+Private Function DictGetBool(ByVal obj As Object, ByVal keyText As String) As Boolean
+    On Error GoTo FailSafe
+    If obj Is Nothing Then Exit Function
+    If obj.Exists(keyText) Then
+        DictGetBool = CBool(obj.Item(keyText))
+    End If
+    Exit Function
+FailSafe:
+    Err.Clear
+    DictGetBool = False
+End Function
+
+Private Function GetWideSummarySaveFormat(ByVal filePath As String) As Long
+    Dim ext As String
+
+    ext = LCase$(Mid$(filePath, InStrRev(filePath, ".") + 1))
+    Select Case ext
+        Case "xls"
+            GetWideSummarySaveFormat = 56
+        Case "xlsx"
+            GetWideSummarySaveFormat = 51
+        Case "xlsm"
+            GetWideSummarySaveFormat = 52
+        Case "xlsb"
+            GetWideSummarySaveFormat = 50
+        Case Else
+            GetWideSummarySaveFormat = 51
+    End Select
+End Function
+
+Private Function ResolveWideSummaryWorkbookPath(ByVal rawPath As String) As String
+    Dim txt As String
+
+    txt = Trim$(rawPath)
+    If Len(txt) = 0 Then Exit Function
+    If Left$(txt, 2) = "\\" Or (Len(txt) >= 2 And Mid$(txt, 2, 1) = ":") Then
+        ResolveWideSummaryWorkbookPath = txt
+    Else
+        ResolveWideSummaryWorkbookPath = ThisWorkbook.Path & "\" & txt
+    End If
+End Function
+
+Private Sub EnsureWideSummaryParentFolder(ByVal filePath As String)
+    Dim fso As Object
+    Dim parentPath As String
+    Dim parts() As String
+    Dim i As Long
+    Dim acc As String
+
+    parentPath = ""
+    On Error Resume Next
+    parentPath = Left$(filePath, InStrRev(filePath, "\") - 1)
+    On Error GoTo 0
+    If Len(parentPath) = 0 Then Exit Sub
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FolderExists(parentPath) Then Exit Sub
+
+    parts = Split(parentPath, "\")
+    If UBound(parts) < 1 Then Exit Sub
+
+    If Right$(parts(0), 1) = ":" Then
+        acc = parts(0) & "\"
+        i = 1
+    Else
+        acc = parts(0)
+        i = 1
+    End If
+
+    For i = i To UBound(parts)
+        If parts(i) <> "" Then
+            If Right$(acc, 1) <> "\" Then acc = acc & "\"
+            acc = acc & parts(i)
+            If Not fso.FolderExists(acc) Then
+                On Error Resume Next
+                fso.CreateFolder acc
+                On Error GoTo 0
+            End If
+        End If
+    Next i
+End Sub
+
+Private Function WideSummaryFileExists(ByVal filePath As String) As Boolean
+    On Error Resume Next
+    WideSummaryFileExists = (Len(Dir(filePath, vbNormal)) > 0)
+    On Error GoTo 0
+End Function
+
+Private Function FindWideSummaryOpenWorkbookByPath(ByVal workbookPath As String) As Workbook
+    Dim wb As Workbook
+    For Each wb In Application.Workbooks
+        If StrComp(wb.FullName, workbookPath, vbTextCompare) = 0 Then
+            Set FindWideSummaryOpenWorkbookByPath = wb
+            Exit Function
+        End If
+    Next wb
+End Function
 
 Private Sub ProcessOneExtractRule(ByVal wsRule As Worksheet, ByVal ruleRow As Long, ByVal wsResult As Worksheet, ByRef resultRow As Long, ByVal targetWb As Workbook, ByVal fileModified As String, ByVal dataDateText As String, ByVal dateSource As String, ByVal duplicateMap As Object, ByVal pathMappings As Collection, ByRef hitSheets As Long, ByRef outputRows As Long, ByRef skipRules As Long, ByRef duplicateRows As Long)
 
@@ -13049,23 +14149,9 @@ Private Function BuildRowPath(ByVal ws As Worksheet, ByVal rowNo As Long, ByVal 
 
 
 
-    If rowHeaderCols Is Nothing Or rowHeaderCols.Count = 0 Then
+    If rowHeaderCols Is Nothing Then Exit Function
 
-
-
-
-
-
-
-        Exit Function
-
-
-
-
-
-
-
-    End If
+    If rowHeaderCols.Count = 0 Then Exit Function
 
 
 
@@ -13962,6 +15048,7 @@ Private Function BuildUniquePathMapForCols(ByVal sourceBookName As String, ByVal
 
 
         basePath = BuildColPath(headerText, colNo)
+        If basePath = "" Then basePath = BuildFallbackColPath(colNo)
 
 
 
@@ -14058,6 +15145,7 @@ Private Function BuildUniquePathMapForCols(ByVal sourceBookName As String, ByVal
 
 
         basePath = BuildColPath(headerText, colNo)
+        If basePath = "" Then basePath = BuildFallbackColPath(colNo)
 
 
 
@@ -16937,6 +18025,40 @@ End Function
 
 
 
+Private Function MatchWorksheetsCached(ByVal wb As Workbook, ByVal sheetKeywords As String, ByVal cache As Object) As Collection
+    Dim cacheKey As String
+    Dim cached As Object
+
+    If cache Is Nothing Then
+        Set MatchWorksheetsCached = MatchWorksheets(wb, sheetKeywords)
+        Exit Function
+    End If
+
+    cacheKey = BuildWorksheetMatchCacheKey(wb, sheetKeywords)
+    If ObjectHasKey(cache, cacheKey) Then
+        Set cached = DictGetObject(cache, cacheKey)
+        If Not cached Is Nothing Then
+            Set MatchWorksheetsCached = cached
+            Exit Function
+        End If
+    End If
+
+    Set cached = MatchWorksheets(wb, sheetKeywords)
+    DictSetObject cache, cacheKey, cached
+    Set MatchWorksheetsCached = cached
+End Function
+
+Private Function BuildWorksheetMatchCacheKey(ByVal wb As Workbook, ByVal sheetKeywords As String) As String
+    Dim wbKey As String
+
+    On Error Resume Next
+    wbKey = wb.FullName
+    On Error GoTo 0
+    If Trim$(wbKey) = "" Then wbKey = wb.Name
+
+    BuildWorksheetMatchCacheKey = LCase$(Trim$(wbKey)) & "||" & LCase$(Trim$(sheetKeywords))
+End Function
+
 Private Function MatchAllKeywords(ByVal sourceText As String, ByVal keywordText As String) As Boolean
 
 
@@ -17977,6 +19099,12 @@ End Function
 
 
 
+Private Sub EnsureRuleHeaderIfNeeded(ByVal wsRule As Worksheet)
+    If wsRule Is Nothing Then Exit Sub
+    If Trim$(CStr(wsRule.Cells(1, rcEnabled).Value)) <> "" Then Exit Sub
+    InitRuleHeader wsRule
+End Sub
+
 Private Sub InitRuleHeader(ByVal ws As Worksheet)
 
 
@@ -18089,7 +19217,13 @@ Private Sub InitRuleHeader(ByVal ws As Worksheet)
 
 
 
-    ws.Cells(1, rcRemark).Value = "备注"
+    ws.Cells(1, rcTargetWorkbook).Value = "目标工作簿路径"
+    ws.Cells(1, rcTargetSheet).Value = "目标工作表"
+    ws.Cells(1, rcTargetWriteEnabled).Value = "启用目标写入"
+
+    SetHeaderComment ws.Cells(1, rcTargetWorkbook), "可选。填写后规则汇总结果将直接去重追加写入该工作簿；留空则回退到临时结果工作簿。支持绝对路径或相对本工具目录。"
+    SetHeaderComment ws.Cells(1, rcTargetSheet), "可选。与目标工作簿路径配合使用。目标表不存在会自动新建；若未填写则回退到临时结果工作簿。"
+    SetHeaderComment ws.Cells(1, rcTargetWriteEnabled), "可选。填写 Y/1/TRUE/是 时，允许将规则汇总结果写入目标工作簿；留空默认按启用处理。"
 
 
 
@@ -19401,7 +20535,7 @@ End Sub
 
 
 
-Private Sub CompareOneRuleByPath(ByVal wsRule As Worksheet, ByVal ruleRow As Long, ByVal templateWb As Workbook, ByVal sourceWb As Workbook, ByVal compareWs As Worksheet, ByRef resultRow As Long, ByRef hitSheets As Long, ByRef diffRows As Long, ByRef sameRows As Long, ByRef skipRules As Long)
+Private Sub CompareOneRuleByPath(ByVal wsRule As Worksheet, ByVal ruleRow As Long, ByVal templateWb As Workbook, ByVal sourceWb As Workbook, ByVal compareWs As Worksheet, ByRef resultRow As Long, ByRef hitSheets As Long, ByRef diffRows As Long, ByRef sameRows As Long, ByRef skipRules As Long, Optional ByVal sourceSheetMatchCache As Object = Nothing, Optional ByVal templateSheetMatchCache As Object = Nothing, Optional ByVal pathMapCache As Object = Nothing)
 
 
 
@@ -19705,7 +20839,7 @@ Private Sub CompareOneRuleByPath(ByVal wsRule As Worksheet, ByVal ruleRow As Lon
 
 
 
-    Set sourceSheets = MatchWorksheets(sourceWb, sheetKeywords)
+    Set sourceSheets = MatchWorksheetsCached(sourceWb, sheetKeywords, sourceSheetMatchCache)
 
 
 
@@ -19729,7 +20863,7 @@ Private Sub CompareOneRuleByPath(ByVal wsRule As Worksheet, ByVal ruleRow As Lon
 
 
 
-    Set templateSheets = MatchWorksheets(templateWb, sheetKeywords)
+    Set templateSheets = MatchWorksheetsCached(templateWb, sheetKeywords, templateSheetMatchCache)
 
 
 
@@ -19841,7 +20975,7 @@ Private Sub CompareOneRuleByPath(ByVal wsRule As Worksheet, ByVal ruleRow As Lon
 
 
 
-            CompareSheetPathsByPath templateWs, sourceItem, compareWs, resultRow, ruleName, bookKeywords, sheetKeywords, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, sourceWb.Name, diffRows, sameRows
+            CompareSheetPathsByPath templateWs, sourceItem, compareWs, resultRow, ruleName, bookKeywords, sheetKeywords, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, sourceWb.Name, diffRows, sameRows, True, pathMapCache
 
 
 
@@ -21041,7 +22175,7 @@ End Sub
 
 
 
-Private Sub CompareSheetPathsByPath(ByVal templateWs As Worksheet, ByVal sourceWs As Worksheet, ByVal compareWs As Worksheet, ByRef resultRow As Long, ByVal ruleName As String, ByVal bookKeywords As String, ByVal sheetKeywords As String, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal sourceBookName As String, ByRef diffRows As Long, ByRef sameRows As Long, Optional ByVal outputAllRows As Boolean = True)
+Private Sub CompareSheetPathsByPath(ByVal templateWs As Worksheet, ByVal sourceWs As Worksheet, ByVal compareWs As Worksheet, ByRef resultRow As Long, ByVal ruleName As String, ByVal bookKeywords As String, ByVal sheetKeywords As String, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal sourceBookName As String, ByRef diffRows As Long, ByRef sameRows As Long, Optional ByVal outputAllRows As Boolean = True, Optional ByVal pathMapCache As Object = Nothing)
 
 
 
@@ -21105,7 +22239,7 @@ Private Sub CompareSheetPathsByPath(ByVal templateWs As Worksheet, ByVal sourceW
 
 
 
-    Set templateRowMap = BuildPathOccurrenceMap(templateWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, True)
+    Set templateRowMap = BuildPathOccurrenceMapCached(templateWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, True, pathMapCache)
 
 
 
@@ -21113,7 +22247,7 @@ Private Sub CompareSheetPathsByPath(ByVal templateWs As Worksheet, ByVal sourceW
 
 
 
-    Set sourceRowMap = BuildPathOccurrenceMap(sourceWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, True)
+    Set sourceRowMap = BuildPathOccurrenceMapCached(sourceWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, True, pathMapCache)
 
 
 
@@ -21121,7 +22255,7 @@ Private Sub CompareSheetPathsByPath(ByVal templateWs As Worksheet, ByVal sourceW
 
 
 
-    Set templateColMap = BuildPathOccurrenceMap(templateWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, False)
+    Set templateColMap = BuildPathOccurrenceMapCached(templateWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, False, pathMapCache)
 
 
 
@@ -21129,7 +22263,7 @@ Private Sub CompareSheetPathsByPath(ByVal templateWs As Worksheet, ByVal sourceW
 
 
 
-    Set sourceColMap = BuildPathOccurrenceMap(sourceWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, False)
+    Set sourceColMap = BuildPathOccurrenceMapCached(sourceWs, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, False, pathMapCache)
 
 
 
@@ -21328,6 +22462,60 @@ End Function
 
 
 
+
+Private Function BuildPathOccurrenceMapCached(ByVal ws As Worksheet, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal isRowPath As Boolean, ByVal cache As Object) As Object
+    Dim cacheKey As String
+    Dim cached As Object
+
+    If cache Is Nothing Then
+        Set BuildPathOccurrenceMapCached = BuildPathOccurrenceMap(ws, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, isRowPath)
+        Exit Function
+    End If
+
+    cacheKey = BuildPathMapCacheKey(ws, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, isRowPath)
+    If ObjectHasKey(cache, cacheKey) Then
+        Set cached = DictGetObject(cache, cacheKey)
+        If Not cached Is Nothing Then
+            Set BuildPathOccurrenceMapCached = cached
+            Exit Function
+        End If
+    End If
+
+    Set cached = BuildPathOccurrenceMap(ws, rowHeaderCols, colHeaderRows, dataStartRow, dataEndRow, dataStartCol, dataEndCol, skipKeywords, isRowPath)
+    DictSetObject cache, cacheKey, cached
+    Set BuildPathOccurrenceMapCached = cached
+End Function
+
+Private Function BuildPathMapCacheKey(ByVal ws As Worksheet, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal isRowPath As Boolean) As String
+    Dim wbKey As String
+    Dim rowColsKey As String
+    Dim colRowsKey As String
+
+    On Error Resume Next
+    wbKey = ws.Parent.FullName
+    On Error GoTo 0
+    If Trim$(wbKey) = "" Then wbKey = ws.Parent.Name
+
+    rowColsKey = BuildCollectionCacheKey(rowHeaderCols)
+    colRowsKey = BuildCollectionCacheKey(colHeaderRows)
+
+    BuildPathMapCacheKey = LCase$(Trim$(wbKey)) & "||" & LCase$(Trim$(ws.Name)) & "||" & rowColsKey & "||" & colRowsKey & "||" & CStr(dataStartRow) & "||" & CStr(dataEndRow) & "||" & CStr(dataStartCol) & "||" & CStr(dataEndCol) & "||" & LCase$(Trim$(skipKeywords)) & "||" & CStr(isRowPath)
+End Function
+
+Private Function BuildCollectionCacheKey(ByVal items As Collection) As String
+    Dim i As Long
+    Dim onePart As String
+
+    If items Is Nothing Then Exit Function
+    For i = 1 To items.Count
+        onePart = Trim$(CStr(items(i)))
+        If i = 1 Then
+            BuildCollectionCacheKey = onePart
+        Else
+            BuildCollectionCacheKey = BuildCollectionCacheKey & "," & onePart
+        End If
+    Next i
+End Function
 
 Private Function BuildPathOccurrenceMap(ByVal ws As Worksheet, ByVal rowHeaderCols As Collection, ByVal colHeaderRows As Collection, ByVal dataStartRow As Long, ByVal dataEndRow As Long, ByVal dataStartCol As Long, ByVal dataEndCol As Long, ByVal skipKeywords As String, ByVal isRowPath As Boolean) As Object
 

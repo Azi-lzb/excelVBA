@@ -71,7 +71,7 @@ Public Sub 功能3dot14_按批注删除重复行()
         End If
     Next ws
 
-    If Len(wb.path) > 0 And Not wb.ReadOnly Then
+    If openedByCode And Len(wb.path) > 0 And Not wb.ReadOnly Then
         On Error Resume Next
         wb.Save
         On Error GoTo 0

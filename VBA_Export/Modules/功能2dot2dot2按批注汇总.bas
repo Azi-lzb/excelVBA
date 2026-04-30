@@ -515,7 +515,7 @@ Private Sub DoSummarizeSheetFromPanel()
     Next srcWs
     If sheetAtc.count = 0 Then
         MsgBox "模板无批注", vbExclamation
-        tmplWb.Close False
+        SafeCloseWorkbookLocal tmplWb, False
         GoTo CleanupPanel
     End If
 
@@ -523,7 +523,7 @@ Private Sub DoSummarizeSheetFromPanel()
     If bForceTemplate Then
         If Not sheetAtc.Exists(TMPL_SHT) Then
             MsgBox "模板工作簿中未找到工作表「" & TMPL_SHT & "」。强制按模板时必须有该表。", vbExclamation
-            tmplWb.Close False
+            SafeCloseWorkbookLocal tmplWb, False
             GoTo CleanupPanel
         End If
         Set atcTmp = sheetAtc(TMPL_SHT)
@@ -585,12 +585,12 @@ Private Sub DoSummarizeSheetFromPanel()
 NextSrcWs:
         Next srcWs
         RunLog_WriteRow logKey, "汇总", srcWb.Name, "", "", "成功", "成功", ""
-        srcWb.Close False
+        SafeCloseWorkbookLocal srcWb, False
         Set srcWb = Nothing
     Next fi
 
     RunLog_WriteRow logKey, "完成", "", "", "", "", "Done", CStr(Round(Timer - t0, 2))
-    tmplWb.Close False
+    SafeCloseWorkbookLocal tmplWb, False
     Set tmplWb = Nothing
 
     For Each srcWs In newWb.Worksheets
@@ -626,8 +626,8 @@ ErrPanel:
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
     On Error Resume Next
-    If Not srcWb Is Nothing Then srcWb.Close False
-    If Not tmplWb Is Nothing Then tmplWb.Close False
+    SafeCloseWorkbookLocal srcWb, False
+    SafeCloseWorkbookLocal tmplWb, False
     On Error GoTo 0
     RunLog_WriteRow logKey, "失败", "", "", "", "失败", Err.Number & " " & Err.Description, CStr(Round(Timer - t0, 2))
     MsgBox "错误 " & Err.Number & ": " & Err.Description, vbCritical
@@ -638,4 +638,13 @@ CleanupPanel:
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
     RunLog_WriteRow logKey, "取消", "", "", "", "", "取消", CStr(Round(Timer - t0, 2))
+End Sub
+
+Private Sub SafeCloseWorkbookLocal(ByRef wb As Workbook, Optional ByVal saveChanges As Boolean = False)
+    On Error Resume Next
+    If Not wb Is Nothing Then
+        wb.Close SaveChanges:=saveChanges
+        Set wb = Nothing
+    End If
+    On Error GoTo 0
 End Sub

@@ -19,6 +19,8 @@ Public Sub 功能3dot15_按配置去重追加到目标()
     Dim wsCfg As Worksheet
     Dim lastRow As Long
     Dim r As Long
+    Dim cfgArr As Variant
+    Dim cfgRowIdx As Long
     Dim enabled As Boolean
     Dim srcWbPath As String
     Dim srcSheetName As String
@@ -66,6 +68,8 @@ Public Sub 功能3dot15_按配置去重追加到目标()
     Dim taskItem As Variant
     Dim taskRowNo As Long
     Dim processedTasks As Long
+    Dim sourceResolvedCache As Object
+    Dim sourceResolved As String
 
     Set wsCfg = FindConfigSheet()
     If wsCfg Is Nothing Then
@@ -73,11 +77,12 @@ Public Sub 功能3dot15_按配置去重追加到目标()
         Exit Sub
     End If
 
-    lastRow = GetLastUsedRow(wsCfg)
+    lastRow = GetConfigLastRowFast(wsCfg)
     If lastRow < 2 Then
         MsgBox "配置表为空，请先填写配置。", vbExclamation, "按配置去重追加到目标"
         Exit Sub
     End If
+    cfgArr = wsCfg.Range(wsCfg.Cells(2, 1), wsCfg.Cells(lastRow, 7)).Value2
 
     Set wbCache = CreateObject("Scripting.Dictionary")
     Set openedByCode = CreateObject("Scripting.Dictionary")
@@ -86,19 +91,21 @@ Public Sub 功能3dot15_按配置去重追加到目标()
     Set taskLogs = New Collection
     Set sourceGroups = CreateObject("Scripting.Dictionary")
     Set sourceOrder = New Collection
+    Set sourceResolvedCache = CreateObject("Scripting.Dictionary")
 
     CaptureAppState prevScreenUpdating, prevDisplayAlerts, prevEnableEvents, prevCalc
     BeginFastMode
     On Error GoTo FailHandler
 
-    For r = 2 To lastRow
-        execMode = NormalizeExecMode(wsCfg.Cells(r, 7).Value2)
-        enabled = IsTruthyValue(wsCfg.Cells(r, 1).Value2)
-        srcWbPath = NormalizeText(wsCfg.Cells(r, 2).Value2)
-        srcSheetName = NormalizeText(wsCfg.Cells(r, 3).Value2)
-        dedupeColsText = NormalizeText(wsCfg.Cells(r, 4).Value2)
-        tgtWbPath = NormalizeText(wsCfg.Cells(r, 5).Value2)
-        tgtSheetName = NormalizeText(wsCfg.Cells(r, 6).Value2)
+    For cfgRowIdx = 1 To UBound(cfgArr, 1)
+        r = cfgRowIdx + 1
+        execMode = NormalizeExecMode(cfgArr(cfgRowIdx, 7))
+        enabled = IsTruthyValue(cfgArr(cfgRowIdx, 1))
+        srcWbPath = NormalizeText(cfgArr(cfgRowIdx, 2))
+        srcSheetName = NormalizeText(cfgArr(cfgRowIdx, 3))
+        dedupeColsText = NormalizeText(cfgArr(cfgRowIdx, 4))
+        tgtWbPath = NormalizeText(cfgArr(cfgRowIdx, 5))
+        tgtSheetName = NormalizeText(cfgArr(cfgRowIdx, 6))
 
         If Not enabled Then
             skipTask = skipTask + 1
@@ -112,8 +119,17 @@ Public Sub 功能3dot15_按配置去重追加到目标()
             GoTo nextConfigRow
         End If
 
-        sourceGroupKey = LCase$(ResolveWorkbookPath(srcWbPath)) & "||" & LCase$(srcSheetName)
-        If Len(sourceGroupKey) = 2 Then sourceGroupKey = LCase$(srcWbPath) & "||" & LCase$(srcSheetName)
+        If sourceResolvedCache.Exists(srcWbPath) Then
+            sourceResolved = CStr(sourceResolvedCache(srcWbPath))
+        Else
+            sourceResolved = ResolveWorkbookPath(srcWbPath)
+            sourceResolvedCache(srcWbPath) = sourceResolved
+        End If
+        If Len(sourceResolved) > 0 Then
+            sourceGroupKey = LCase$(sourceResolved) & "||" & LCase$(srcSheetName)
+        Else
+            sourceGroupKey = LCase$(srcWbPath) & "||" & LCase$(srcSheetName)
+        End If
         If Not sourceGroups.Exists(sourceGroupKey) Then
             Set groupedTasks = New Collection
             sourceGroups.Add sourceGroupKey, groupedTasks
@@ -121,7 +137,7 @@ Public Sub 功能3dot15_按配置去重追加到目标()
         End If
         sourceGroups(sourceGroupKey).Add Array(CLng(r), srcWbPath, srcSheetName, dedupeColsText, tgtWbPath, tgtSheetName, execMode)
 nextConfigRow:
-    Next r
+    Next cfgRowIdx
 
     For Each sourceGroupKey In sourceOrder
         Set groupedTasks = sourceGroups(CStr(sourceGroupKey))
@@ -269,7 +285,7 @@ nextSourceGroup:
         Set groupedTasks = Nothing
     Next sourceGroupKey
 
-    SaveModifiedWorkbooks wbCache, modified
+    SaveModifiedWorkbooks wbCache, modified, openedByCode
     CloseOpenedWorkbooks wbCache, openedByCode
     RestoreAppState prevScreenUpdating, prevDisplayAlerts, prevEnableEvents, prevCalc
     FlushTaskStatLogs taskLogs
@@ -285,12 +301,28 @@ nextSourceGroup:
     Exit Sub
 
 FailHandler:
-    SaveModifiedWorkbooks wbCache, modified
+    SaveModifiedWorkbooks wbCache, modified, openedByCode
     CloseOpenedWorkbooks wbCache, openedByCode
     RestoreAppState prevScreenUpdating, prevDisplayAlerts, prevEnableEvents, prevCalc
     FlushTaskStatLogs taskLogs
     MsgBox "执行失败：" & CStr(Err.Number) & " " & Err.Description, vbCritical, "按配置去重追加到目标"
 End Sub
+
+Private Function GetConfigLastRowFast(ByVal ws As Worksheet) As Long
+    Dim c As Long
+    Dim lr As Long
+    Dim maxRow As Long
+
+    If ws Is Nothing Then Exit Function
+
+    For c = 1 To 7
+        lr = ws.Cells(ws.Rows.Count, c).End(xlUp).row
+        If lr > maxRow Then maxRow = lr
+    Next c
+
+    If maxRow < 1 Then maxRow = 1
+    GetConfigLastRowFast = maxRow
+End Function
 
 Private Function FindConfigSheet() As Worksheet
     On Error Resume Next
@@ -921,9 +953,10 @@ Private Function BuildRowKeyByColumns(ByVal ws As Worksheet, ByVal rowIndex As L
     BuildRowKeyByColumns = parts
 End Function
 
-Private Sub SaveModifiedWorkbooks(ByVal wbCache As Object, ByVal modified As Object)
+Private Sub SaveModifiedWorkbooks(ByVal wbCache As Object, ByVal modified As Object, ByVal openedByCode As Object)
     Dim key As Variant
     Dim wb As Workbook
+    Dim shouldSave As Boolean
 
     If wbCache Is Nothing Then Exit Sub
     If modified Is Nothing Then Exit Sub
@@ -933,6 +966,11 @@ Private Sub SaveModifiedWorkbooks(ByVal wbCache As Object, ByVal modified As Obj
             Set wb = wbCache(CStr(key))
             If Not wb Is Nothing Then
                 If Not wb.ReadOnly Then
+                    shouldSave = False
+                    If openedByCode.Exists(CStr(key)) Then
+                        shouldSave = CBool(openedByCode(CStr(key)))
+                    End If
+                    If Not shouldSave Then GoTo NextModifiedWorkbook
                     On Error Resume Next
                     If FileExists(CStr(key)) Then
                         wb.Save
@@ -943,6 +981,7 @@ Private Sub SaveModifiedWorkbooks(ByVal wbCache As Object, ByVal modified As Obj
                 End If
             End If
         End If
+NextModifiedWorkbook:
     Next key
 End Sub
 

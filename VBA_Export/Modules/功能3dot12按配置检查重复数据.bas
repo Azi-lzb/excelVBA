@@ -134,7 +134,7 @@ Public Sub 功能3dot12_按配置检查重复数据()
 nextRow:
     Next r
 
-    SaveModifiedWorkbooks wbCache, modified
+    SaveModifiedWorkbooks wbCache, modified, openedByCode
     CloseOpenedWorkbooks wbCache, openedByCode
     RestoreAppState prevScreenUpdating, prevDisplayAlerts, prevEnableEvents, prevCalc
 
@@ -145,7 +145,7 @@ nextRow:
     Exit Sub
 
 FailHandler:
-    SaveModifiedWorkbooks wbCache, modified
+    SaveModifiedWorkbooks wbCache, modified, openedByCode
     CloseOpenedWorkbooks wbCache, openedByCode
     RestoreAppState prevScreenUpdating, prevDisplayAlerts, prevEnableEvents, prevCalc
     MsgBox "执行失败：" & CStr(Err.Number) & " " & Err.Description, vbCritical, "按配置检查重复数据"
@@ -651,24 +651,32 @@ OpenFail:
     messageText = CStr(Err.Number) & " " & Err.Description
 End Function
 
-Private Sub SaveModifiedWorkbooks(ByVal wbCache As Object, ByVal modified As Object)
+Private Sub SaveModifiedWorkbooks(ByVal wbCache As Object, ByVal modified As Object, ByVal openedByCode As Object)
     Dim key As Variant
     Dim wb As Workbook
+    Dim shouldSave As Boolean
 
     If wbCache Is Nothing Then Exit Sub
     If modified Is Nothing Then Exit Sub
+    If openedByCode Is Nothing Then Exit Sub
 
     For Each key In modified.keys
         If wbCache.Exists(CStr(key)) Then
             Set wb = wbCache(CStr(key))
             If Not wb Is Nothing Then
                 If Not wb.ReadOnly Then
+                    shouldSave = False
+                    If openedByCode.Exists(CStr(key)) Then
+                        shouldSave = CBool(openedByCode(CStr(key)))
+                    End If
+                    If Not shouldSave Then GoTo NextModifiedWorkbook
                     On Error Resume Next
                     wb.Save
                     On Error GoTo 0
                 End If
             End If
         End If
+NextModifiedWorkbook:
     Next key
 End Sub
 

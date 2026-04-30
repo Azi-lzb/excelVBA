@@ -1,0 +1,2 @@
+是否启用	打印模式	源工作簿	源工作表	源工作表打印区域	目标工作簿	目标工作表	FitToPagesWide	FitToPagesTall	备注
+N	1	C:\Users\AZI\Desktop\source_demo.xlsx	打印页	A1:H60;A65:H120	C:\Users\AZI\Desktop\target_demo.xlsx	打印汇总	1	1	示例：模式1按配置打印到目标表，分页1x2。

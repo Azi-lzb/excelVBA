@@ -71,7 +71,7 @@ Public Sub 功能3dot11_按批注检查重复数据()
         End If
     Next ws
 
-    If Len(wb.path) > 0 And Not wb.ReadOnly Then
+    If openedByCode And Len(wb.path) > 0 And Not wb.ReadOnly Then
         On Error Resume Next
         wb.Save
         On Error GoTo 0

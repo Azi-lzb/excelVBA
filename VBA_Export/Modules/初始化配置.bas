@@ -10,6 +10,8 @@ Public Const EXTRACT_SHEET_NAME As String = "工作表提取"
 Public Const CONFIG_RENAME_SHEET_NAME As String = "config_rename"
 Public Const HOME_SHEET_NAME As String = "统计工具"
 Private Const INITDATA_DIR As String = "VBA_Export\InitData\"
+Private Const TIMELINE_RULE_SHEET_NAME As String = "时序提取规则"
+Private Const PATH_STD_MAP_SHEET_NAME As String = "路径标准化映射"
 ' 执行面板布局：
 ' A1=模板文件（标签），A2=模板文件路径
 ' B1=外部文件（标签），B2=外部文件路径
@@ -488,6 +490,91 @@ Public Sub 初始化统计工具()
         End If
     End With
     MsgBox "已初始化工作表：" & HOME_SHEET_NAME, vbInformation
+End Sub
+
+Public Sub InitTimelineRuleSheet()
+    Dim ws As Worksheet
+    Dim created As Boolean
+    Set ws = EnsureSheetByName(TIMELINE_RULE_SHEET_NAME, created)
+    If ws Is Nothing Then Exit Sub
+
+    With ws
+        .Cells(1, 1).value = "是否启用"
+        .Cells(1, 2).value = "规则名称"
+        .Cells(1, 3).value = "工作簿关键字"
+        .Cells(1, 4).value = "工作表关键字"
+        .Cells(1, 5).value = "行头列"
+        .Cells(1, 6).value = "列表头行"
+        .Cells(1, 7).value = "必含列头"
+        .Cells(1, 8).value = "必含行头"
+        .Cells(1, 9).value = "数据起始行"
+        .Cells(1, 10).value = "数据结束行"
+        .Cells(1, 11).value = "数据起始列"
+        .Cells(1, 12).value = "数据结束列"
+        .Cells(1, 13).value = "跳过关键字"
+        .Cells(1, 14).value = "目标工作簿路径"
+        .Cells(1, 15).value = "目标工作表"
+        .Cells(1, 16).value = "启用目标写入"
+        .Range("A1:P1").Font.Bold = True
+        .Columns("A:P").AutoFit
+    End With
+
+    SetHeaderCommentLocal ws.Cells(1, 1), "是否启用该规则。填写 Y/1/TRUE/是 时生效。"
+    SetHeaderCommentLocal ws.Cells(1, 2), "规则名称。建议同类规则命名一致。"
+    SetHeaderCommentLocal ws.Cells(1, 3), "工作簿关键字。支持多个关键字，用分号分隔。"
+    SetHeaderCommentLocal ws.Cells(1, 4), "工作表关键字。支持多个关键字，用分号分隔。"
+    SetHeaderCommentLocal ws.Cells(1, 5), "行头所在列，如 B 或 2。"
+    SetHeaderCommentLocal ws.Cells(1, 6), "列表头所在行，支持多行，如 38,39。"
+    SetHeaderCommentLocal ws.Cells(1, 7), "必含列头路径，支持多个，用分号分隔。"
+    SetHeaderCommentLocal ws.Cells(1, 8), "必含行头路径，支持多个，用分号分隔。"
+    SetHeaderCommentLocal ws.Cells(1, 9), "数据起始行。"
+    SetHeaderCommentLocal ws.Cells(1, 10), "数据结束行。可为空表示到尾部。"
+    SetHeaderCommentLocal ws.Cells(1, 11), "数据起始列，如 C 或 3。"
+    SetHeaderCommentLocal ws.Cells(1, 12), "数据结束列。可为空表示到尾部。"
+    SetHeaderCommentLocal ws.Cells(1, 13), "跳过关键字。命中则跳过该表。"
+    SetHeaderCommentLocal ws.Cells(1, 14), "可选。目标工作簿路径。为空时回退到临时结果工作簿。"
+    SetHeaderCommentLocal ws.Cells(1, 15), "可选。目标工作表。不存在会自动新建。"
+    SetHeaderCommentLocal ws.Cells(1, 16), "可选。填写 Y/1/TRUE/是 时，允许写入目标工作簿。留空默认启用。"
+
+    MsgBox "已初始化工作表：" & TIMELINE_RULE_SHEET_NAME, vbInformation
+End Sub
+
+Public Sub InitPathStandardMapSheet()
+    Dim ws As Worksheet
+    Dim created As Boolean
+    Set ws = EnsureSheetByName(PATH_STD_MAP_SHEET_NAME, created)
+    If ws Is Nothing Then Exit Sub
+
+    With ws
+        .Cells(1, 1).value = "是否启用"
+        .Cells(1, 2).value = "规则名称"
+        .Cells(1, 3).value = "工作簿关键字"
+        .Cells(1, 4).value = "工作表关键字"
+        .Cells(1, 5).value = "目标类型"
+        .Cells(1, 6).value = "匹配方式"
+        .Cells(1, 7).value = "原始路径"
+        .Cells(1, 8).value = "标准路径"
+        .Cells(1, 9).value = "备注"
+        .Range("A1:I1").Font.Bold = True
+        .Columns("A:I").AutoFit
+    End With
+
+    MsgBox "已初始化工作表：" & PATH_STD_MAP_SHEET_NAME, vbInformation
+End Sub
+
+Public Sub 初始化时序提取规则()
+    InitTimelineRuleSheet
+End Sub
+
+Public Sub 初始化路径标准化映射_旧入口()
+    InitPathStandardMapSheet
+End Sub
+
+Private Sub SetHeaderCommentLocal(ByVal targetCell As Range, ByVal commentText As String)
+    On Error Resume Next
+    If Not targetCell.Comment Is Nothing Then targetCell.Comment.Delete
+    targetCell.AddComment commentText
+    On Error GoTo 0
 End Sub
 
 ' 将工作表整表（含表头与数据）导出为 TSV，用于保存到 InitData 供后续初始化使用。
